@@ -36,6 +36,9 @@ def main():
         df = pd.DataFrame(cur.fetchall(), columns=["prod_name", "pub_date", "avg_price", "unit_info"])
     conn.close()
     df["pub_date"] = pd.to_datetime(df["pub_date"])
+    # 跨后端兼容: MySQL DECIMAL → Decimal(object), 显式转数值
+    df["avg_price"] = pd.to_numeric(df["avg_price"], errors="coerce")
+    df = df[df["avg_price"].notna()]
 
     ref = df["pub_date"].max()
     idx = pd.date_range(ref - timedelta(days=DAYS - 1), ref)

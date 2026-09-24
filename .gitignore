@@ -17,3 +17,7 @@ frontend/dist/
 *.log
 .DS_Store
 Thumbs.db
+
+# 敏感配置(数据库凭据等, 经环境变量/python/.env注入, 永不入库)
+python/.env
+.env

@@ -97,7 +97,9 @@ def load_df() -> pd.DataFrame:
     conn.close()
     df = pd.DataFrame(rows, columns=["prod_name", "pub_date", "avg_price", "unit_info"])
     df["pub_date"] = pd.to_datetime(df["pub_date"])
-    return df
+    # 跨后端兼容: MySQL DECIMAL 经 pymysql 返回 Decimal(object dtype), 需显式转数值
+    df["avg_price"] = pd.to_numeric(df["avg_price"], errors="coerce")
+    return df[df["avg_price"].notna()]
 
 
 def dominant_unit(df: pd.DataFrame, name: str) -> str:

@@ -1,7 +1,7 @@
-# 里程碑0 · 采集/演示依赖（清华镜像安装: pip install -r python/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple）
+# 采集/算法/调度依赖(清华镜像: pip install -r python/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple)
 requests>=2.31
 pandas>=2.0
 statsmodels>=0.14
 pyecharts>=2.0
-# 迁移 MySQL 阶段再启用:
-# pymysql>=1.1
+apscheduler>=3.10,<4      # W1 定时调度
+pymysql>=1.1              # W1 MySQL 迁移

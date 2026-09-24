@@ -1,37 +1,43 @@
 # -*- coding: utf-8 -*-
 """
-新发地批发价格采集器（里程碑0 · 选题试开发验证）
-================================================
-接口 : POST http://www.xinfadi.com.cn/getPriceData.html（字段以真实返回为准）
+新发地批发价格采集器 v2（W1 采集服务化）
+=========================================
+接口 : POST http://www.xinfadi.com.cn/getPriceData.html（字段以真实返回为准, 分页总数= count）
 
-采集铁律（AGENTS.md）:
-  1) 频率 ≤ 1次/秒（页间 sleep 1s）
-  2) 必须携带 User-Agent
-  3) 解析前先打印一条真实返回确认字段名（本脚本 probe 子命令）
-  4) SQL 一律参数化 + executemany，重复数据靠唯一约束 + upsert 去重
-  5) 数据快照入库，分析与预测只读库，不在请求时现场爬取
+采集铁律（AGENTS.md / 蓝图 §9）:
+  1) 频率 ≤ 1次/秒（页间 sleep ≥1s）
+  2) 必须携带 User-Agent（ASCII, 禁中文——HTTP 头 latin-1 限制）
+  3) 解析前先打印真实返回确认字段（probe 子命令）
+  4) SQL 一律参数化 + executemany, 唯一约束(v2 含 unit_info) + upsert 去重
+  5) 快照策略: 只写库, 分析/预测一律读库
 
 用法:
-  python python/collector/xinfadi.py probe                # 单页探测: 打印第一条真实JSON + 各品类检索效果
-  python python/collector/xinfadi.py collect              # 批量采集 5 品类全部可回溯历史
-  python python/collector/xinfadi.py collect --only 大白菜,黄瓜   # 只采集指定品类
+  python python/collector/xinfadi.py probe              # 单页探测: 打印第一条真实JSON + 品类检索效果
+  python python/collector/xinfadi.py collect            # 全量采集(接口可回溯的全部历史, 上限2022-01-01)
+  python python/collector/xinfadi.py collect --days 3   # 增量: 只采最近3天(调度器用)
+  python python/collector/xinfadi.py collect --only 大白菜,黄瓜
+
+供调度器导入: from collector.xinfadi import collect
+  collect(days=3) -> {"categories": [...], "rows_written": int, "anomalies": [...]}
 """
 import argparse
 import json
 import math
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
-# Windows 控制台中文输出保护（避免 GBK 编码错误）
+# Windows 控制台中文输出保护
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import requests
 
 # 使 collector/ 能导入 python/ 下的 config 包
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config.db import get_connection, get_upsert_sql, DB_BACKEND, cursor  # noqa: E402
+from config.db import (get_connection, get_upsert_sql, cursor,  # noqa: E402
+                       DB_BACKEND, placeholder)
+from config.constants import CATEGORIES, OVERRIDE               # noqa: E402
 
 API_URL = "http://www.xinfadi.com.cn/getPriceData.html"
 PAGE_LIMIT = 200      # 单页条数（接口实际上限 200, 超出会被截断）
@@ -40,24 +46,19 @@ RETRIES = 3           # 单页失败重试次数（带退避）
 MAX_PAGES = 2000      # 每品类安全页数上限, 防御死循环
 
 HEADERS = {
-    # 铁律: 必须携带 User-Agent。注意: HTTP 头只允许 latin-1 字符, UA 内禁止中文!
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 "
-                   "agri-price-radar/0.1 (thesis-demo)"),
+                   "agri-price-radar/1.0 (thesis)"),
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     "Referer": "http://www.xinfadi.com.cn/price.html",
     "X-Requested-With": "XMLHttpRequest",
     "Accept": "application/json, text/javascript, */*; q=0.01",
 }
 
-# 里程碑0 目标品类（探测实测: 西红柿 count=0; 猪肉仅11条无关品 → 强制替换）
-CATEGORIES = ["大白菜", "黄瓜", "西红柿", "猪肉", "鸡蛋"]
-# 用户已确认的品类词替换（即使原词 count>0 也替换, 如"猪肉"的11条是"黄金福袋(猪肉馅)"等无关品）
-OVERRIDE = {"猪肉": "白条猪", "西红柿": "番茄"}
 # 替换词仍检索不到时的自动降级候选
 FALLBACK = {"白条猪": ["前臀尖", "后臀尖"], "番茄": ["西红柿"]}
 
-anomalies = []   # 异常台账, 采集结束统一打印/汇报
+anomalies = []   # 异常台账
 
 
 def log(msg: str) -> None:
@@ -65,13 +66,14 @@ def log(msg: str) -> None:
 
 
 # ---------------------------------------------------------------- 请求层
-def fetch_page(prod_name: str, current: int, limit: int = PAGE_LIMIT):
-    """请求一页数据; 成功返回 (dict, 耗时s), 重试耗尽返回 (None, None)"""
+def fetch_page(prod_name: str, current: int, limit: int = PAGE_LIMIT,
+               d_start: str = "", d_end: str = ""):
+    """请求一页; 可选日期窗口(YYYY-MM-DD); 成功返回 (dict, 耗时s), 重试耗尽返回 (None, None)"""
     payload = {
         "limit": str(limit),
         "current": str(current),
-        "pubDateStartTime": "",
-        "pubDateEndTime": "",
+        "pubDateStartTime": d_start,
+        "pubDateEndTime": d_end,
         "prodPcatid": "",
         "prodCatid": "",
         "prodName": prod_name,
@@ -88,7 +90,6 @@ def fetch_page(prod_name: str, current: int, limit: int = PAGE_LIMIT):
             except UnicodeDecodeError:
                 txt = resp.content.decode("gbk", errors="replace")
             js = json.loads(txt)
-            # 实测分页字段: {"current", "limit", "count"(总数), "list"}（以真实返回为准）
             if str(js.get("errcode", "0")) != "0":
                 raise RuntimeError(f"errcode={js.get('errcode')}, errstr={js.get('errstr')}")
             return js, cost
@@ -98,6 +99,11 @@ def fetch_page(prod_name: str, current: int, limit: int = PAGE_LIMIT):
             if attempt < RETRIES:
                 time.sleep(2 * attempt)   # 退避 2s/4s
     return None, None
+
+
+def total_of(js) -> int:
+    """接口返回的总条数字段（实测为 count, 兼容 total）"""
+    return int(js.get("count") or js.get("total") or 0)
 
 
 # ---------------------------------------------------------------- 解析层（字段以 probe 确认为准）
@@ -126,27 +132,22 @@ def parse_rows(lst: list, cat: str) -> list:
             bad += 1
             continue
         rows.append((
-            str(it.get("prodName") or "").strip(),        # prod_name
-            str(it.get("prodCat") or "").strip() or None, # prod_cat
-            to_f(it.get("lowPrice")),                     # low_price
-            to_f(it.get("highPrice")),                    # high_price
-            to_f(it.get("avgPrice")),                     # avg_price
-            str(it.get("place") or "").strip(),           # place（规范化''便于唯一约束判重）
-            str(it.get("specInfo") or "").strip(),        # spec_info
-            str(it.get("unitInfo") or "").strip(),        # unit_info
-            d,                                            # pub_date
+            str(it.get("prodName") or "").strip(),
+            str(it.get("prodCat") or "").strip() or None,
+            to_f(it.get("lowPrice")),
+            to_f(it.get("highPrice")),
+            to_f(it.get("avgPrice")),
+            str(it.get("place") or "").strip(),
+            str(it.get("specInfo") or "").strip(),
+            str(it.get("unitInfo") or "").strip(),
+            d,
         ))
     if bad:
         anomalies.append(f"{cat}: {bad} 条记录 pubDate 无法解析, 已跳过")
     return rows
 
 
-def total_of(js) -> int:
-    """接口返回的总条数字段（实测为 count, 兼容 total）"""
-    return int(js.get("count") or js.get("total") or 0)
-
-
-# ---------------------------------------------------------------- probe: 先确认字段再动手
+# ---------------------------------------------------------------- probe: 字段确认
 def cmd_probe() -> int:
     log(f"数据库后端: {DB_BACKEND}")
     log("步骤1: 向新发地接口发一次单页请求(limit=10), 完整打印第一条真实返回 ...")
@@ -162,7 +163,7 @@ def cmd_probe() -> int:
     print(f"(本页 {len(rows)} 条, 接口 count={total_of(js)}, 耗时 {cost:.2f}s)\n")
 
     time.sleep(INTERVAL)
-    log("步骤2: 核查 5 个品类词的检索效果（判断精确/模糊匹配, 尤其'猪肉'）...")
+    log("步骤2: 核查 5 个品类词的检索效果 ...")
     for term in CATEGORIES:
         js2, _ = fetch_page(term, 1, limit=10)
         if js2 is None:
@@ -177,9 +178,9 @@ def cmd_probe() -> int:
     return 0
 
 
-# ---------------------------------------------------------------- collect: 批量采集
+# ---------------------------------------------------------------- 品类词解析与统计
 def resolve_term(term: str) -> str:
-    """品类词解析: 先应用用户确认的 OVERRIDE 替换, 再校验检索有效性, 必要时自动降级"""
+    """先应用用户确认的 OVERRIDE 替换, 再校验检索有效性, 必要时自动降级"""
     if term in OVERRIDE:
         anomalies.append(f"品类词'{term}'按确认方案替换为'{OVERRIDE[term]}'(原词无有效行情数据)")
         term = OVERRIDE[term]
@@ -196,40 +197,50 @@ def resolve_term(term: str) -> str:
 
 
 def category_stats(conn, term: str):
-    """品类入库统计: (展示名, 精确条数, 最早日期, 最新日期, [关键词聚合明细])
-    说明: 黄瓜/鸡蛋等为模糊检索, 会连同 小黄瓜/柴鸡蛋 等同族品名一起入库,
-    故同时报告精确品名条数与关键词聚合条数。"""
+    """品类入库统计: (展示名, 条数, 最早日期, 最新日期, [模糊品名明细])——查询跨后端参数化"""
+    ph = placeholder()
     with cursor(conn) as cur:
-        cur.execute("SELECT COUNT(*), MIN(pub_date), MAX(pub_date) FROM price_daily WHERE prod_name = ?",
-                    (term,))
+        cur.execute(f"SELECT COUNT(*), MIN(pub_date), MAX(pub_date) FROM price_daily "
+                    f"WHERE prod_name = {ph}", (term,))
         cnt, dmin, dmax = cur.fetchone()
-        cur.execute("SELECT COUNT(*), MIN(pub_date), MAX(pub_date) FROM price_daily WHERE prod_name LIKE ?",
-                    (f"%{term}%",))
+        cur.execute(f"SELECT COUNT(*), MIN(pub_date), MAX(pub_date) FROM price_daily "
+                    f"WHERE prod_name LIKE {ph}", (f"%{term}%",))
         cnt2, dmin2, dmax2 = cur.fetchone()
-        if cnt2 > cnt:   # 模糊聚合更多 → 合并展示
-            cur.execute("SELECT prod_name, COUNT(*) FROM price_daily WHERE prod_name LIKE ? "
-                        "GROUP BY prod_name ORDER BY COUNT(*) DESC", (f"%{term}%",))
+        if cnt2 > cnt:   # 模糊聚合更多(黄瓜/鸡蛋等同族品名), 合并展示
+            cur.execute(f"SELECT prod_name, COUNT(*) FROM price_daily WHERE prod_name LIKE {ph} "
+                        f"GROUP BY prod_name ORDER BY COUNT(*) DESC", (f"%{term}%",))
             names = cur.fetchall()
-            disp = f"{term}(品类聚合)"
-            dmin, dmax = min(x for x in (dmin, dmin2) if x), max(x for x in (dmax, dmax2) if x)
-            return disp, cnt2, dmin, dmax, names
+            dmin = min(x for x in (dmin, dmin2) if x)
+            dmax = max(x for x in (dmax, dmax2) if x)
+            return f"{term}(品类聚合)", cnt2, dmin, dmax, names
         return term, cnt, dmin, dmax, None
 
 
-def cmd_collect(only: str | None) -> int:
+# ---------------------------------------------------------------- collect: 全量/增量
+def collect(only: str | None = None, days: int | None = None) -> dict:
+    """采集核心(供 CLI 与调度器共用)。
+    days=None 全量; days=N 增量: 日期窗口 = [今天-N+1, 今天]（upsert 幂等, 重复跑安全）"""
+    ph_dates = ""
+    d_start = d_end = ""
+    if days:
+        today = date.today()
+        d_start = (today - timedelta(days=days - 1)).isoformat()
+        d_end = today.isoformat()
+        ph_dates = f", 窗口 {d_start}~{d_end}"
+
     cats = [c.strip() for c in only.split(",") if c.strip()] if only else list(CATEGORIES)
     conn = get_connection()
     upsert_sql = get_upsert_sql()
-    log(f"数据库后端: {DB_BACKEND}")
-    log(f"开始采集品类: {cats}（单页 {PAGE_LIMIT} 条, 间隔 {INTERVAL}s, 预计耗时见进度日志）")
+    log(f"数据库后端: {DB_BACKEND}; 品类: {cats}; 模式: {'增量' if days else '全量'}{ph_dates}")
 
     resolved = []
     for c in cats:
         resolved.append(resolve_term(c))
         time.sleep(INTERVAL)
 
+    summaries, rows_written = [], 0
     for cat in resolved:
-        first, cost = fetch_page(cat, 1)
+        first, cost = fetch_page(cat, 1, d_start=d_start, d_end=d_end)
         if first is None:
             log(f"!! {cat} 首页请求失败, 跳过该品类")
             continue
@@ -242,15 +253,16 @@ def cmd_collect(only: str | None) -> int:
             with cursor(conn) as cur:
                 cur.executemany(upsert_sql, rows)   # 铁律: 参数化 executemany
             conn.commit()
+            rows_written += len(rows)
 
         fail_streak, done = 0, 1
         for page in range(2, pages + 1):
             time.sleep(INTERVAL)                    # 铁律: ≤1次/秒
-            js, _ = fetch_page(cat, page)
+            js, _ = fetch_page(cat, page, d_start=d_start, d_end=d_end)
             if js is None:
                 fail_streak += 1
                 if fail_streak >= 3:
-                    anomalies.append(f"{cat}: 连续{fail_streak}页失败, 提前终止该品类(已抓{done}/{pages}页)")
+                    anomalies.append(f"{cat}: 连续{fail_streak}页失败, 提前终止(已抓{done}/{pages}页)")
                     break
                 continue
             fail_streak = 0
@@ -259,6 +271,7 @@ def cmd_collect(only: str | None) -> int:
                 with cursor(conn) as cur:
                     cur.executemany(upsert_sql, rows)
                 conn.commit()
+                rows_written += len(rows)
             done += 1
             if page % 10 == 0 or page == pages:
                 log(f"  {cat} 进度: {done}/{pages} 页")
@@ -266,23 +279,26 @@ def cmd_collect(only: str | None) -> int:
         disp, cnt, dmin, dmax, detail = category_stats(conn, cat)
         extra = f", 品名明细: {detail[:4]}" if detail else ""
         log(f"【{cat} 完成】入库 {cnt} 条, 时间跨度 {dmin} ~ {dmax}{extra}")
+        summaries.append({"term": cat, "display": disp, "count": cnt,
+                          "min_date": str(dmin), "max_date": str(dmax)})
 
     conn.close()
     print("\n========== 异常台账 ==========")
-    if anomalies:
-        for a in anomalies:
-            print(" -", a)
-    else:
-        print(" - 无异常")
-    return 0
+    for a in anomalies or ["无异常"]:
+        print(" -", a)
+    return {"categories": summaries, "rows_written": rows_written, "anomalies": list(anomalies)}
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="新发地批发价采集器(里程碑0)")
+    ap = argparse.ArgumentParser(description="新发地批发价采集器(W1)")
     ap.add_argument("cmd", choices=["probe", "collect"], help="probe=单页字段探测; collect=批量采集")
     ap.add_argument("--only", default=None, help="只采集指定品类, 逗号分隔, 如: 大白菜,黄瓜")
+    ap.add_argument("--days", type=int, default=None, help="增量模式: 只采最近N天(如 3)")
     args = ap.parse_args()
-    return cmd_probe() if args.cmd == "probe" else cmd_collect(args.only)
+    if args.cmd == "probe":
+        return cmd_probe()
+    collect(only=args.only, days=args.days)
+    return 0
 
 
 if __name__ == "__main__":
