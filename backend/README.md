@@ -31,7 +31,16 @@ D:\Program\tools\apache-maven-3.9.16\bin\mvn.cmd -s maven-settings.xml test
 
 可用环境变量：`APR_SERVER_PORT`（默认 8081）、`APR_MYSQL_USER`（默认 root）、`APR_MYSQL_PWD`（**必填**）。
 
-## 三、接口（W2.1 已实现，统一响应 `{code,msg,data}`）
+## 三、接口（统一响应 `{code,msg,data}`）
+
+**认证（W2.2）**
+
+| 方法 | 路径 | 说明 | 权限 |
+|---|---|---|---|
+| POST | `/api/auth/login` | 登录, 返回 token/角色/有效期 | 公开 |
+| GET | `/api/auth/me` | 当前登录用户 | 登录 |
+
+**业务（W2.1，W2.2 起需登录）**
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -39,24 +48,67 @@ D:\Program\tools\apache-maven-3.9.16\bin\mvn.cmd -s maven-settings.xml test
 | GET | `/api/price/trend?category=大白菜&days=90` | 日度均价序列（days 1–1095） |
 | GET | `/api/price/change?category=鸡蛋` | 最新日环比（红涨绿跌由前端渲染） |
 | GET | `/api/predict/latest?category=大白菜` | 未来7天预测 + 模型 + 测试集 MAPE + **免责声明** |
-| GET | `/api/admin/collect/logs?page=1&size=10` | 任务日志分页 |
-| GET | `/api/admin/collect/stats?category=大白菜` | 单品类数据量与跨度 |
 
-自测示例：
+**预警（W2.2）**
 
-```bat
-curl http://localhost:8081/api/price/categories
-curl "http://localhost:8081/api/predict/latest?category=大白菜"
+| 方法 | 路径 | 说明 | 权限 |
+|---|---|---|---|
+| GET | `/api/alert/rules` | 预警规则列表 | 登录 |
+| PUT | `/api/alert/rules/{id}` | 修改阈值/启用状态 | **ADMIN** |
+| POST | `/api/alert/evaluate` | 立即执行一次评估 | **ADMIN** |
+| GET | `/api/alert/records?page=&size=` | 预警记录分页 | 登录 |
+| GET | `/api/alert/summary` | 各品类触发次数 | 登录 |
+
+**管理端（W2.2）**
+
+| 方法 | 路径 | 说明 | 权限 |
+|---|---|---|---|
+| GET | `/api/admin/collect/logs?page=&size=` | 任务日志分页 | DATA_ADMIN / ADMIN |
+| GET | `/api/admin/collect/stats?category=` | 单品类数据量与跨度 | DATA_ADMIN / ADMIN |
+| POST | `/api/admin/collect/trigger` | 手动触发增量采集（异步子进程） | DATA_ADMIN / ADMIN |
+
+自测示例（PowerShell）：
+
+```powershell
+$base = 'http://localhost:8081'
+$login = Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType 'application/json' `
+         -Body '{"username":"admin","password":"admin123"}'
+$h = @{ Authorization = "Bearer $($login.data.token)" }
+Invoke-RestMethod "$base/api/price/categories" -Headers $h
+Invoke-RestMethod "$base/api/predict/latest?category=大白菜" -Headers $h
+Invoke-RestMethod "$base/api/alert/rules" -Headers $h
 ```
 
-## 四、数据库
+## 四、鉴权与权限模型（W2.2）
 
-- 业务表由 Python 侧建表并写入：`price_daily`(26,193 行) / `predict_result`(35 行) / `collect_log`
-- 权限三表（`sys_user` / `sys_role` / `sys_user_role`）执行：`python python/scripts/run_sql.py backend/sql/w2_auth.sql`
-- 预置账号（**仅开发环境**，首次登录后强制改密）：`admin`/`admin123`、`dataadmin`/`dataadmin123`（BCrypt 存储）
+- **JWT 无状态**（HS256，`jjwt` 0.12.6），不依赖 Redis；密钥由 `apr.jwt.secret` / 环境变量 `APR_JWT_SECRET` 提供（**生产必须覆盖**），有效期 `APR_JWT_EXPIRE_MINUTES`（默认 120 分钟）。
+- 规则：`/api/auth/login` 公开；`/api/admin/**` 需 ADMIN 或 DATA_ADMIN；其余 `/api/**` 需登录。
+- 细粒度：`PUT /api/alert/rules/{id}` 与 `POST /api/alert/evaluate` 用 `@PreAuthorize("hasRole('ADMIN')")` 限定超级管理员。
+- 401/403 均返回统一结构（HTTP 200 + body.code），便于前端拦截器统一处理；登录失败对"用户不存在/密码错误"返回同一提示。
+- 定时任务：预警评估由 `@Scheduled`（默认每日 21:30，`apr.alert.cron` 可配）执行，结果写 `collect_log`。
 
-## 五、待办（W2.2）
+## 五、数据库
 
-- `spring-boot-starter-security` + JWT 登录、双角色强制校验（`/api/admin/**` 需 DATA_ADMIN+）
-- 手动触发采集接口 `POST /api/admin/collect/trigger`
-- Redis 缓存接入（当前未安装 Redis，暂用默认内存缓存，配置可切换）
+- 业务表由 Python 侧写入：`price_daily`(26,193 行) / `predict_result`(35 行) / `collect_log`
+- 权限三表：`python python/scripts/run_sql.py backend/sql/w2_auth.sql`
+- 预警两表：`python python/scripts/run_sql.py backend/sql/w22_alert.sql`
+- 预置账号（**仅开发环境**）：`admin`/`admin123`、`dataadmin`/`dataadmin123`（BCrypt）
+
+## 六、测试
+
+```bat
+set APR_MYSQL_PWD=你的MySQL密码
+D:\Program\tools\apache-maven-3.9.16\bin\mvn.cmd -s maven-settings.xml test
+```
+
+共 **30 例**（需 MySQL 可达且已执行两个 SQL 脚本）：
+- `CategoryCatalogTest`(3)：品类映射与单位治理结论
+- `PriceApiIntegrationTest`(8)：价格/预测接口 + 参数校验
+- `AuthApiIntegrationTest`(10)：登录成功/失败/无令牌/非法令牌/角色访问/当前用户
+- `AlertApiIntegrationTest`(9)：规则列表/阈值修改/**越权 403**/非法值 400/不存在 404/记录/概览/手动触发
+
+## 七、待办（W3）
+
+- 首次登录强制改密（`sys_user` 增 `must_change_pwd` 字段）
+- 操作审计 `op_log`
+- Redis 缓存接入（本机未安装, 当前无状态 JWT 与内存缓存已满足需求）

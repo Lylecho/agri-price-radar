@@ -7,6 +7,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
+
 /**
  * 任务日志查询服务（管理端监控定时采集/预计算）
  */
@@ -25,5 +27,21 @@ public class CollectLogService {
         Page<CollectLog> result = collectLogMapper.selectPage(page,
                 new LambdaQueryWrapper<CollectLog>().orderByDesc(CollectLog::getStartedAt));
         return PageResultVO.of(result);
+    }
+
+    /**
+     * 写入任务日志（Java 侧任务: 手动采集、预警评估）
+     * 与 Python 侧 scheduler 写同一张 collect_log, 管理端统一查看
+     */
+    public void writeLog(String job, String status, String detail, Integer rowsWritten,
+                         LocalDateTime startedAt, LocalDateTime finishedAt) {
+        CollectLog log = new CollectLog();
+        log.setJob(job);
+        log.setStatus(status);
+        log.setDetail(detail == null ? null : detail.substring(0, Math.min(1000, detail.length())));
+        log.setRowsWritten(rowsWritten);
+        log.setStartedAt(startedAt);
+        log.setFinishedAt(finishedAt);
+        collectLogMapper.insert(log);
     }
 }

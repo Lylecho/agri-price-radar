@@ -1,31 +1,31 @@
 package com.agri.priceradar;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 价格/预测接口集成测试（需要 MySQL 可达, 且已设置环境变量 APR_MYSQL_PWD）
+ * 价格/预测/管理端接口集成测试（鉴权接入后需携带令牌）
  * 覆盖: 正常返回结构、五品类、预测免责声明、参数校验与未知品类的错误码
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-class PriceApiIntegrationTest {
+class PriceApiIntegrationTest extends ApiTestBase {
 
-    @Autowired
-    private MockMvc mockMvc;
+    private String token;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        token = adminToken();
+        org.junit.jupiter.api.Assertions.assertNotNull(token, "登录失败, 请先执行 backend/sql/w2_auth.sql 种子脚本");
+    }
 
     @Test
     @DisplayName("GET /api/price/categories 返回 200 与五个品类")
     void categoriesShouldReturnFive() throws Exception {
-        mockMvc.perform(get("/api/price/categories"))
+        mockMvc.perform(get("/api/price/categories").header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.length()").value(5))
@@ -36,7 +36,8 @@ class PriceApiIntegrationTest {
     @Test
     @DisplayName("GET /api/price/trend 返回日度均价序列")
     void trendShouldReturnSeries() throws Exception {
-        mockMvc.perform(get("/api/price/trend").param("category", "大白菜").param("days", "90"))
+        mockMvc.perform(get("/api/price/trend").param("category", "大白菜").param("days", "90")
+                        .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data").isArray())
@@ -47,7 +48,8 @@ class PriceApiIntegrationTest {
     @Test
     @DisplayName("GET /api/price/change 返回环比结构")
     void changeShouldReturnPct() throws Exception {
-        mockMvc.perform(get("/api/price/change").param("category", "鸡蛋"))
+        mockMvc.perform(get("/api/price/change").param("category", "鸡蛋")
+                        .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.changePct").exists())
@@ -57,7 +59,8 @@ class PriceApiIntegrationTest {
     @Test
     @DisplayName("GET /api/predict/latest 必须携带模型/MAPE/免责声明与7个预测点")
     void predictShouldCarryModelMapeAndDisclaimer() throws Exception {
-        mockMvc.perform(get("/api/predict/latest").param("category", "大白菜"))
+        mockMvc.perform(get("/api/predict/latest").param("category", "大白菜")
+                        .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.model").exists())
@@ -69,7 +72,8 @@ class PriceApiIntegrationTest {
     @Test
     @DisplayName("未知品类应返回 400 参数错误")
     void unknownCategoryShouldReturn400() throws Exception {
-        mockMvc.perform(get("/api/price/trend").param("category", "胡萝卜").param("days", "90"))
+        mockMvc.perform(get("/api/price/trend").param("category", "胡萝卜").param("days", "90")
+                        .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400));
     }
@@ -77,7 +81,8 @@ class PriceApiIntegrationTest {
     @Test
     @DisplayName("days 越界应返回 400 而非 500")
     void daysOutOfRangeShouldReturn400() throws Exception {
-        mockMvc.perform(get("/api/price/trend").param("category", "大白菜").param("days", "5000"))
+        mockMvc.perform(get("/api/price/trend").param("category", "大白菜").param("days", "5000")
+                        .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400));
     }
@@ -85,7 +90,7 @@ class PriceApiIntegrationTest {
     @Test
     @DisplayName("缺少必要参数应返回 400")
     void missingParamShouldReturn400() throws Exception {
-        mockMvc.perform(get("/api/price/change"))
+        mockMvc.perform(get("/api/price/change").header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400));
     }
@@ -93,7 +98,8 @@ class PriceApiIntegrationTest {
     @Test
     @DisplayName("管理端任务日志分页结构正确")
     void adminLogsShouldPage() throws Exception {
-        mockMvc.perform(get("/api/admin/collect/logs").param("page", "1").param("size", "5"))
+        mockMvc.perform(get("/api/admin/collect/logs").param("page", "1").param("size", "5")
+                        .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.total").exists())

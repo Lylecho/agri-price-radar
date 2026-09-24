@@ -23,6 +23,7 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # 引入 python/config
 
+from apscheduler.events import EVENT_SCHEDULER_STARTED       # noqa: E402
 from apscheduler.schedulers.blocking import BlockingScheduler   # noqa: E402
 from apscheduler.triggers.cron import CronTrigger               # noqa: E402
 
@@ -99,8 +100,17 @@ def main() -> int:
     sched.add_job(job_precompute, CronTrigger(hour=21, minute=0, timezone=TZ),
                   id="precompute", max_instances=1, coalesce=True,
                   misfire_grace_time=3600)
+
+    # 注: APScheduler 3.11 起 Job.next_run_time 仅在调度器启动后可用,
+    #     故先打印触发规则, 启动后再经事件监听打印下次触发时间
     for j in sched.get_jobs():
-        print(f"已注册: {j.id} -> 下次触发 {j.next_run_time:%Y-%m-%d %H:%M:%S}")
+        print(f"已注册任务: {j.id} -> {j.trigger}")
+
+    def on_started(event):
+        for j in sched.get_jobs():
+            print(f"下次触发: {j.id} -> {getattr(j, 'next_run_time', '待定')}", flush=True)
+
+    sched.add_listener(on_started, EVENT_SCHEDULER_STARTED)
     print("调度器常驻启动(Ctrl+C 退出) ...", flush=True)
     sched.start()
     return 0

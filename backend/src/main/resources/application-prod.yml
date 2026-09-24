@@ -1,0 +1,11 @@
+# 生产 profile（D2 修复: 关闭 SQL 打印, 收敛日志）
+# 启动: java -jar xxx.jar --spring.profiles.active=prod
+mybatis-plus:
+  configuration:
+    # 生产不打印 SQL(开发期由 application.yml 打开)
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
+logging:
+  level:
+    root: warn
+    com.agri.priceradar: info

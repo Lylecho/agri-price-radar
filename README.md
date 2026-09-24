@@ -122,12 +122,40 @@ CREATE TABLE collect_log (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时任务运行日志';
 ```
 
-### 5.4 权限与审计（W2 落地）
+### 5.4 权限、预警与审计（W2 落地）
 
 `sys_user` / `sys_role` / `sys_user_role` 三表已在 W2.1 建好并预置账号（DDL 见 `backend/sql/w2_auth.sql`，BCrypt 存储）：
 - 角色：`ADMIN`（超级管理员）/ `DATA_ADMIN`（数据管理员）
-- 预置账号（**仅开发环境**）：`admin`/`admin123`、`dataadmin`/`dataadmin123`，首次登录强制改密（W2.2）
-- 仍预留：`alert_rule`（阈值预警）、`op_log`（操作审计）
+- 预置账号（**仅开发环境**）：`admin`/`admin123`、`dataadmin`/`dataadmin123`，首次登录强制改密（顺延）
+- 仍预留：`op_log`（操作审计）
+
+**预警两表（W2.2 落地, DDL 见 `backend/sql/w22_alert.sql`）**：
+
+```sql
+CREATE TABLE alert_rule (              -- 波动预警规则
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    category VARCHAR(32) NOT NULL,
+    metric   VARCHAR(16) NOT NULL DEFAULT 'DOD_PCT' COMMENT 'DOD_PCT=日环比涨跌幅(%)',
+    threshold DECIMAL(6,3) NOT NULL COMMENT '阈值(绝对值,%)',
+    enabled  TINYINT NOT NULL DEFAULT 1,
+    remark   VARCHAR(128),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_rule (category, metric)
+) COMMENT='波动预警规则';
+
+CREATE TABLE alert_record (            -- 预警触发记录(同品类+指标+交易日唯一, 重跑幂等)
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    category VARCHAR(32) NOT NULL, metric VARCHAR(16) NOT NULL,
+    trade_date DATE NOT NULL, prev_date DATE NULL,
+    latest_price DECIMAL(10,3), prev_price DECIMAL(10,3),
+    change_pct DECIMAL(6,3), threshold DECIMAL(6,3), message VARCHAR(255),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_record (category, metric, trade_date)
+) COMMENT='波动预警记录';
+```
+
+**阈值语义（用户确认）**：`|日环比涨跌幅| ≥ 阈值` 触发，按品类配置（默认 5%）。
 
 ## 6. 接口清单（SpringBoot，统一响应 `{code, msg, data}`，code=200 成功）
 
@@ -135,20 +163,27 @@ CREATE TABLE collect_log (
 
 | 状态 | 方法 | 路径 | 说明 | 权限 |
 |---|---|---|---|---|
-| ⏳ | POST | /api/auth/login | JWT 登录（返回双角色之一） | 公开 |
-| ✅ | GET | /api/price/categories | 品类列表+代表品名+最新价+单位 | 登录(W2.2加) |
-| ✅ | GET | /api/price/trend?category=&days= | 日度均价序列（days 1–1095） | 登录(W2.2加) |
-| ✅ | GET | /api/price/change?category= | 最新日环比（红涨绿跌） | 登录(W2.2加) |
-| ✅ | GET | /api/predict/latest?category= | 未来7天预测+模型+MAPE+免责声明 | 登录(W2.2加) |
-| ✅ | GET | /api/admin/collect/logs?page=&size= | collect_log 分页 | DATA_ADMIN+(W2.2加) |
-| ✅ | GET | /api/admin/collect/stats?category= | 各品类数据量/时间跨度 | DATA_ADMIN+(W2.2加) |
-| ⏳ | POST | /api/admin/collect/trigger | 手动触发一次增量采集（异步） | DATA_ADMIN+ |
+| ✅ | POST | /api/auth/login | JWT 登录（返回 token + 角色） | 公开 |
+| ✅ | GET | /api/auth/me | 当前登录用户（刷新校验登录态） | 登录 |
+| ✅ | GET | /api/price/categories | 品类列表+代表品名+最新价+单位 | 登录 |
+| ✅ | GET | /api/price/trend?category=&days= | 日度均价序列（days 1–1095） | 登录 |
+| ✅ | GET | /api/price/change?category= | 最新日环比（红涨绿跌） | 登录 |
+| ✅ | GET | /api/predict/latest?category= | 未来7天预测+模型+MAPE+免责声明 | 登录 |
+| ✅ | GET | /api/alert/rules | 预警规则列表 | 登录 |
+| ✅ | PUT | /api/alert/rules/{id} | 修改阈值/启用状态 | **ADMIN** |
+| ✅ | POST | /api/alert/evaluate | 立即执行一次预警评估 | **ADMIN** |
+| ✅ | GET | /api/alert/records?page=&size= | 预警记录分页 | 登录 |
+| ✅ | GET | /api/alert/summary | 各品类触发次数概览 | 登录 |
+| ✅ | GET | /api/admin/collect/logs?page=&size= | collect_log 分页 | DATA_ADMIN / ADMIN |
+| ✅ | GET | /api/admin/collect/stats?category= | 各品类数据量/时间跨度 | DATA_ADMIN / ADMIN |
+| ✅ | POST | /api/admin/collect/trigger | 手动触发一次增量采集（异步子进程） | DATA_ADMIN / ADMIN |
 | ⏳ | POST | /ml/forecast | FastAPI 实时预测 `{category, days}`（内网，可降级） | 内网 |
 
 ## 7. 算法方案
 
 - **双通道**（铁律）：日常展示读 `predict_result` 预计算表；实时预测走 SpringBoot → FastAPI `/ml`；FastAPI 不可用时主流程照常。
 - W1：ARIMA（阶数网格 (1-3,1,1-2) 按 AIC 选优；近两年日度均价、主导单位过滤、缺测日线性插值；前80%/后20%切分，测试集 MAPE 随行）。
+- W2.2 预警判定：`|日环比涨跌幅| ≥ 阈值`（按品类, 默认 5%），与 `/api/price/change` 同口径；每日 21:30 由 Java 侧定时任务评估，记录表唯一键保证重跑幂等。
 - W4：Prophet / 特征模型（节假日、季节项）对比实验，按品类择优；MAPE 准入阈值（展示门槛）待 W4 定。
 - 所有预测输出必须携带：模型标识、测试集 MAPE、「预测结果仅供参考，不构成任何买卖建议」。
 
@@ -166,15 +201,17 @@ docker compose 自部署 + DeepSeek API；知识库=价格快照摘要+预警规
 
 ## 10. 环境与部署
 
-Windows 11 + Git Bash/cmd；Python 3.12.10（pip，清华镜像）；Node 22.19 + npm 11.8（npmmirror）；MySQL 8.0.42（凭据经 `python/.env` 注入，**gitignored**）；时区 Asia/Shanghai；文件 UTF-8；调度进程 `python python/scheduler/run.py`（常驻，后续可注册为 Windows 服务）。
+Windows 11 + Git Bash/cmd；Python 3.12.10（pip，清华镜像）；Node 22.19 + npm 11.8（npmmirror）；MySQL 8.0.42（凭据经 `python/.env` 注入，**gitignored**）；时区 Asia/Shanghai；文件 UTF-8。
 
-**Java 侧（W2）**：JDK **17**（`C:\Program Files\Java\jdk-17`；PATH 默认是 JDK23，须显式 `JAVA_HOME`）；Maven 3.9.16 便携安装于 `D:\Program\tools\apache-maven-3.9.16`；后端端口 **8081**（本机 8080 常被其他软件占用，可用 `APR_SERVER_PORT` 覆盖）；数据库密码经 `APR_MYSQL_PWD` 注入。
+**调度常驻（W2.2）**：采集/预计算由 `python python/scheduler/run.py` 常驻执行（08/14/20 采集, 21 预计算）；
+- 快捷启动：双击 `python/scheduler/start-scheduler.bat`（纯 ASCII 脚本, 规避 cmd 代码页问题）
+- 开机自启：**已部署用户启动文件夹** `%APPDATA%\...\Startup\菜价雷达-采集调度.bat`（用户级, 无需管理员）
+- 计划任务（可选, 需管理员）：`powershell -ExecutionPolicy Bypass -File python/scheduler/register-task.ps1`（本机因权限被拒, 脚本已就绪待提权执行）
+- 预警评估由 **Java 侧** `@Scheduled`（每日 21:30）执行, 与 Python 调度分工；结果统一写 `collect_log`
 
-```bat
-cd backend
-D:\Program\tools\apache-maven-3.9.16\bin\mvn.cmd -s maven-settings.xml clean package
-"%JAVA_HOME%\bin\java.exe" -jar target\price-radar-backend-1.0.0.jar
-```
+**Java 侧（W2）**：JDK **17**（`C:\Program Files\Java\jdk-17`；PATH 默认是 JDK23，须显式 `JAVA_HOME`）；Maven 3.9.16 便携安装于 `D:\Program\tools\apache-maven-3.9.16`；后端端口 **8081**（本机 8080 常被其他软件占用，可用 `APR_SERVER_PORT` 覆盖）；数据库密码经 `APR_MYSQL_PWD` 注入；JWT 密钥经 `APR_JWT_SECRET` 覆盖（生产必须改）。
+
+**前端（W3）**：`cd frontend && npm run dev`（5173, 已配 CORS 允许本机来源）；后端地址经 `VITE_API_BASE` 覆盖（默认 http://localhost:8081）。
 
 Redis：**本机未安装**，W2 暂用默认内存缓存，接口不依赖 Redis；待安装后按配置切换（蓝图 §2 技术栈保留 Redis）。
 
@@ -203,7 +240,8 @@ agri-price-radar/
 | M0 | 选题试开发验证：探测/入库/演示页/ARIMA 预览 | ✅ 2026-09-24（v0.2.0） |
 | — | 前端设计系统（令牌/EP主题/组件/规范页/单位治理） | ✅ 2026-09-24（v0.3.0） |
 | **W1** | **采集服务化：DDL v2 迁移 + 增量采集 + APScheduler 定时 + MySQL 切换 + predict_result 预计算 + collect_log** | ✅ 2026-09-24（本地完成，待推送） |
-| W2 | SpringBoot 后端：§6 接口 + JWT/RBAC + Redis 缓存 | ▶ W2.1 完成（只读接口+统一响应+异常处理+RBAC 三表；JWT 待 W2.2） |
+| W2 | SpringBoot 后端：§6 接口 + JWT/RBAC + Redis | ✅ W2.1+W2.2 完成（鉴权/预警/触发/告警测试） |
+| W3 | Vue3 管理端（品类管理/趋势/预测/任务日志页） | ▶ 登录+看板+采集监控+预警配置 已交付; 品类管理/改密待补 |
 | W3 | Vue3 管理端（品类管理/趋势/预测/任务日志页） | 待启动 |
 | W4 | 算法升级：Prophet 对比、MAPE 准入、FastAPI /ml 通道 | 待启动 |
 | W5 | Dify 智能问答 + 1920×1080 可视化大屏（canvas-night） | 待启动 |
@@ -220,6 +258,9 @@ agri-price-radar/
 | 上游 MAPE 偏高（黄瓜 36%、西红柿 49%，波动大） | W4 引入 Prophet/季节项与特征模型，按品类择优并设展示阈值 |
 | MySQL 凭据泄露 | python/.env 注入且 gitignored |
 | 接口改版字段变化 | probe 模式随时人工复核字段 |
+| **PowerShell/cmd 与外部工具交互（已发生）** | `-Dfile.encoding` 被 pwsh 拆坏 → 改用 `JAVA_TOOL_OPTIONS`；`&&` 在 PowerShell 5.1 不可用；`.bat` 中文在 cmd 代码页下解析失败 → **bat 一律纯 ASCII**；`.ps1` 含中文须存 UTF-8 **BOM** |
+| **APScheduler 3.11 API 变更（已发生）** | `Job.next_run_time` 仅在 `sched.start()` 后可用 → 启动前打印触发规则, 启动后经 `EVENT_SCHEDULER_STARTED` 监听打印 |
+| 调度进程崩溃后静默停摆 | 启动文件夹自启 + 启动脚本；建议后续接入心跳告警（W3+） |
 
 ## 14. 开发清单
 
@@ -239,4 +280,15 @@ agri-price-radar/
 - [x] W2.1：统一响应 `{code,msg,data}` + 全局异常处理 + 参数校验（越界/未知品类/缺参 → 400）
 - [x] W2.1：RBAC 三表 + 预置双角色账号（BCrypt）
 - [x] W2.1：测试 11 例全绿（CategoryCatalogTest 3 + PriceApiIntegrationTest 8）
-- [ ] W2.2：JWT 登录 + 双角色强制校验 + 手动触发采集接口 + Redis 接入
+- [x] W2.2：JWT 登录（/api/auth/login、/api/auth/me）+ 双角色强制校验（/api/admin/** 需角色, /api/alert/rules 改阈值仅 ADMIN）
+- [x] W2.2：401/403 统一响应结构；越权用例测试通过
+- [x] W2.2：预警模块（alert_rule / alert_record 两表 + 日环比阈值判定 + 每日21:30定时 + 手动评估接口）
+- [x] W2.2：手动触发采集接口（异步子进程复用 Python 采集器, 互斥保护, 结果写 collect_log）
+- [x] W2.2：后端测试 30 例全绿（新增 AuthApiIntegrationTest 10 + AlertApiIntegrationTest 9）
+- [x] W2.2：调度进程常驻修复（APScheduler 3.11 `next_run_time` 缺陷）+ 启动脚本 + 启动文件夹自启
+- [x] W2.2：前端基础设施（axios 封装/401 拦截/Pinia/路由守卫）+ 登录页 + 数据看板 + 采集监控 + 预警配置
+- [x] W2.2：Python 冒烟测试 11 例全绿
+- [x] W2.2：生产 profile 关闭 SQL 打印
+- [ ] W3：品类管理、首次登录强制改密、操作审计（op_log）
+- [ ] W4：Prophet 对比、MAPE 准入阈值、FastAPI /ml 实时通道
+- [ ] W5：Dify 智能问答 + 1920×1080 可视化大屏

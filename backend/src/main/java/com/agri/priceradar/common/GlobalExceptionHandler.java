@@ -47,6 +47,13 @@ public class GlobalExceptionHandler {
         return Result.fail(ResultCode.PARAM_ERROR, msg);
     }
 
+    /** 方法级安全(@PreAuthorize)拒绝 —— 必须映射为 403, 不可被兜底分支吞成 500 */
+    @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+    public Result<Void> handleAccessDenied(org.springframework.security.access.AccessDeniedException e) {
+        log.warn("权限不足: {}", e.getMessage());
+        return Result.fail(ResultCode.FORBIDDEN, "无权限访问该资源");
+    }
+
     @ExceptionHandler(Exception.class)
     public Result<Void> handleOther(Exception e) {
         log.error("未捕获异常", e);
