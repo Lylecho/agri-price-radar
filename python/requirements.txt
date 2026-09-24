@@ -1,0 +1,7 @@
+# 里程碑0 · 采集/演示依赖（清华镜像安装: pip install -r python/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple）
+requests>=2.31
+pandas>=2.0
+statsmodels>=0.14
+pyecharts>=2.0
+# 迁移 MySQL 阶段再启用:
+# pymysql>=1.1
