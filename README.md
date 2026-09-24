@@ -122,25 +122,28 @@ CREATE TABLE collect_log (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时任务运行日志';
 ```
 
-### 5.4 预留（W2+ 设计时补全）
+### 5.4 权限与审计（W2 落地）
 
-`sys_user` / `sys_role` / `sys_user_role` / `alert_rule`(阈值预警) / `op_log`(操作审计)。
+`sys_user` / `sys_role` / `sys_user_role` 三表已在 W2.1 建好并预置账号（DDL 见 `backend/sql/w2_auth.sql`，BCrypt 存储）：
+- 角色：`ADMIN`（超级管理员）/ `DATA_ADMIN`（数据管理员）
+- 预置账号（**仅开发环境**）：`admin`/`admin123`、`dataadmin`/`dataadmin123`，首次登录强制改密（W2.2）
+- 仍预留：`alert_rule`（阈值预警）、`op_log`（操作审计）
 
-## 6. 接口清单（SpringBoot，W2 实现）
+## 6. 接口清单（SpringBoot，统一响应 `{code, msg, data}`，code=200 成功）
 
-统一响应 `{code, msg, data}`，code=200 成功；前端 Axios 拦截器统一处理。
+> 状态标注：✅ 已实现(W2.1，端口 8081) ｜ ⏳ 待实现
 
-| 方法 | 路径 | 说明 | 权限 |
-|---|---|---|---|
-| POST | /api/auth/login | JWT 登录（返回双角色之一） | 公开 |
-| GET | /api/price/categories | 品类列表+代表品名+最新价+单位 | 登录 |
-| GET | /api/price/trend?category=&days= | 日度均价序列（读 price_daily 聚合） | 登录 |
-| GET | /api/price/change?category= | 最新日环比（红涨绿跌） | 登录 |
-| GET | /api/predict/latest?category= | 未来7天预测+MAPE+「仅供参考」声明（只读 predict_result） | 登录 |
-| GET | /api/admin/collect/logs?page=&size= | collect_log 分页 | DATA_ADMIN+ |
-| POST | /api/admin/collect/trigger | 手动触发一次增量采集（异步） | DATA_ADMIN+ |
-| GET | /api/admin/collect/stats | 各品类数据量/时间跨度 | DATA_ADMIN+ |
-| POST | /ml/forecast | FastAPI 实时预测 `{category, days}`（内网，可降级） | 内网 |
+| 状态 | 方法 | 路径 | 说明 | 权限 |
+|---|---|---|---|---|
+| ⏳ | POST | /api/auth/login | JWT 登录（返回双角色之一） | 公开 |
+| ✅ | GET | /api/price/categories | 品类列表+代表品名+最新价+单位 | 登录(W2.2加) |
+| ✅ | GET | /api/price/trend?category=&days= | 日度均价序列（days 1–1095） | 登录(W2.2加) |
+| ✅ | GET | /api/price/change?category= | 最新日环比（红涨绿跌） | 登录(W2.2加) |
+| ✅ | GET | /api/predict/latest?category= | 未来7天预测+模型+MAPE+免责声明 | 登录(W2.2加) |
+| ✅ | GET | /api/admin/collect/logs?page=&size= | collect_log 分页 | DATA_ADMIN+(W2.2加) |
+| ✅ | GET | /api/admin/collect/stats?category= | 各品类数据量/时间跨度 | DATA_ADMIN+(W2.2加) |
+| ⏳ | POST | /api/admin/collect/trigger | 手动触发一次增量采集（异步） | DATA_ADMIN+ |
+| ⏳ | POST | /ml/forecast | FastAPI 实时预测 `{category, days}`（内网，可降级） | 内网 |
 
 ## 7. 算法方案
 
@@ -163,7 +166,17 @@ docker compose 自部署 + DeepSeek API；知识库=价格快照摘要+预警规
 
 ## 10. 环境与部署
 
-Windows 11 + Git Bash/cmd；Python 3.12.10（pip，清华镜像）；Node 22.19 + npm 11.8（npmmirror）；MySQL 8.0.42（服务运行中，凭据经 `python/.env` 注入，**gitignored**）；时区 Asia/Shanghai；文件 UTF-8；调度进程 `python python/scheduler/run.py`（常驻，W 后期可注册为 Windows 服务）。
+Windows 11 + Git Bash/cmd；Python 3.12.10（pip，清华镜像）；Node 22.19 + npm 11.8（npmmirror）；MySQL 8.0.42（凭据经 `python/.env` 注入，**gitignored**）；时区 Asia/Shanghai；文件 UTF-8；调度进程 `python python/scheduler/run.py`（常驻，后续可注册为 Windows 服务）。
+
+**Java 侧（W2）**：JDK **17**（`C:\Program Files\Java\jdk-17`；PATH 默认是 JDK23，须显式 `JAVA_HOME`）；Maven 3.9.16 便携安装于 `D:\Program\tools\apache-maven-3.9.16`；后端端口 **8081**（本机 8080 常被其他软件占用，可用 `APR_SERVER_PORT` 覆盖）；数据库密码经 `APR_MYSQL_PWD` 注入。
+
+```bat
+cd backend
+D:\Program\tools\apache-maven-3.9.16\bin\mvn.cmd -s maven-settings.xml clean package
+"%JAVA_HOME%\bin\java.exe" -jar target\price-radar-backend-1.0.0.jar
+```
+
+Redis：**本机未安装**，W2 暂用默认内存缓存，接口不依赖 Redis；待安装后按配置切换（蓝图 §2 技术栈保留 Redis）。
 
 ## 11. 目录结构
 
@@ -190,7 +203,7 @@ agri-price-radar/
 | M0 | 选题试开发验证：探测/入库/演示页/ARIMA 预览 | ✅ 2026-09-24（v0.2.0） |
 | — | 前端设计系统（令牌/EP主题/组件/规范页/单位治理） | ✅ 2026-09-24（v0.3.0） |
 | **W1** | **采集服务化：DDL v2 迁移 + 增量采集 + APScheduler 定时 + MySQL 切换 + predict_result 预计算 + collect_log** | ✅ 2026-09-24（本地完成，待推送） |
-| W2 | SpringBoot 后端：§6 接口 + JWT/RBAC + Redis 缓存 | 待启动 |
+| W2 | SpringBoot 后端：§6 接口 + JWT/RBAC + Redis 缓存 | ▶ W2.1 完成（只读接口+统一响应+异常处理+RBAC 三表；JWT 待 W2.2） |
 | W3 | Vue3 管理端（品类管理/趋势/预测/任务日志页） | 待启动 |
 | W4 | 算法升级：Prophet 对比、MAPE 准入、FastAPI /ml 通道 | 待启动 |
 | W5 | Dify 智能问答 + 1920×1080 可视化大屏（canvas-night） | 待启动 |
@@ -220,5 +233,10 @@ agri-price-radar/
 - [x] W1：APScheduler 定时进程（采集 08/14/20 点 + 预计算 21 点；`--now` 手动触发）
 - [x] W1：MySQL 迁移与切换（`.env` 凭据，26,193 行迁入 `agri_price_radar`）
 - [x] W1：predict_result 预计算（5 品类 × 7 天，含模型与 MAPE）+ collect_log 任务日志
-- [ ] W1：远程仓库推送（GitHub 凭据与代理待处理）
-- [ ] W2：SpringBoot 后端 §6 接口 + JWT/RBAC
+- [x] W1：远程仓库推送（GitHub 凭据与代理待处理）
+- [x] W2.1：SpringBoot 工程骨架（SpringBoot 3.3.5 + MyBatis-Plus + JDK17 + 阿里云镜像 + mvnw 免装）
+- [x] W2.1：只读接口 4 个（categories/trend/change/predict）+ 管理端 2 个（logs/stats）
+- [x] W2.1：统一响应 `{code,msg,data}` + 全局异常处理 + 参数校验（越界/未知品类/缺参 → 400）
+- [x] W2.1：RBAC 三表 + 预置双角色账号（BCrypt）
+- [x] W2.1：测试 11 例全绿（CategoryCatalogTest 3 + PriceApiIntegrationTest 8）
+- [ ] W2.2：JWT 登录 + 双角色强制校验 + 手动触发采集接口 + Redis 接入
