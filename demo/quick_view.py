@@ -38,6 +38,9 @@ warnings.filterwarnings("ignore")                     # ARIMA 收敛告警等演
 CATEGORIES = ["大白菜", "黄瓜", "西红柿", "猪肉", "鸡蛋"]
 # 与采集器一致的品类词替换（探测实测: 西红柿/猪肉 在新发地无有效行情, 用番茄/白条猪）
 OVERRIDE = {"西红柿": ["番茄"], "猪肉": ["白条猪"]}
+# 品类语义优先代表品(2026-09单位核查: "鸡蛋"无精确品名; 箱鸡蛋存在 箱/斤 双计价且斤标注被箱价污染,
+# 散鸡蛋为单位单一的纯斤价序列, 语义贴近日常"鸡蛋", 故优先)
+PREFERRED = {"鸡蛋": "散鸡蛋"}
 OUT_HTML = Path(__file__).resolve().parent / "price_demo.html"
 LOCAL_JS = Path(__file__).resolve().parent / "echarts.min.js"   # 本地缓存的 echarts 库
 PALETTE = ["#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de"]
@@ -97,23 +100,36 @@ def load_df() -> pd.DataFrame:
     return df
 
 
+def dominant_unit(df: pd.DataFrame, name: str) -> str:
+    """某品名的主导计价单位"""
+    sub = df[df["prod_name"] == name]["unit_info"].dropna()
+    return str(sub.mode().iat[0]) if len(sub) else ""
+
+
 def representative(df: pd.DataFrame, term: str):
-    """品类词 → 实际品名: 精确 > 已确认替换词 > 模糊匹配中数据量最大者"""
+    """品类词 → 实际品名: 精确 > 替换词 > 语义优先品 > 单位纯净的模糊匹配
+    (单位异构治理: 优先选"计价单位只有斤"的品名, 避免箱/筐整件价混入同轴对比)"""
     names = set(df["prod_name"].unique())
-    for cand in [term, *OVERRIDE.get(term, [])]:
-        if cand in names:
-            return cand, "精确"
+    for cand in [term, *OVERRIDE.get(term, []), PREFERRED.get(term, "")]:
+        if cand and cand in names:
+            return cand, ("精确" if cand == term else "替换")
     like = [n for n in names if term in n]
     if like:
-        top = df[df["prod_name"].isin(like)].groupby("prod_name").size().idxmax()
-        return top, "模糊"
+        clean = [n for n in like
+                 if set(df[df["prod_name"] == n]["unit_info"].dropna()) == {"斤"}]
+        pool = clean or like
+        top = df[df["prod_name"].isin(pool)].groupby("prod_name").size().idxmax()
+        return top, "模糊" + ("(单位过滤)" if clean else "")
     return None, ""
 
 
 def daily_avg(df: pd.DataFrame, name: str) -> pd.Series:
-    """某品名 → 按发布日期聚合的日度均价序列"""
-    return (df[df["prod_name"] == name]
-            .groupby("pub_date")["avg_price"].mean().sort_index())
+    """某品名 → 按发布日期聚合的日度均价序列(仅取该品名主导单位的行, 剔除异单位污染)"""
+    sub = df[df["prod_name"] == name]
+    unit = dominant_unit(df, name)
+    if unit:
+        sub = sub[(sub["unit_info"] == unit) | (sub["unit_info"].isna())]
+    return sub.groupby("pub_date")["avg_price"].mean().sort_index()
 
 
 def unit_of(df: pd.DataFrame, name: str) -> str:
@@ -144,7 +160,7 @@ def chart_90d(series_map: dict, ref) -> Line:
                              subtitle=f"数据截至 {ref:%Y-%m-%d} · 北京新发地 · 单位以各品名实际标注为准"),
         tooltip_opts=opts.TooltipOpts(trigger="axis", axis_pointer_type="cross"),
         xaxis_opts=opts.AxisOpts(axislabel_opts=opts.LabelOpts(rotate=45, interval=7)),
-        yaxis_opts=opts.AxisOpts(name="均价"),
+        yaxis_opts=opts.AxisOpts(name="均价(元/斤)"),
     )
     return line
 

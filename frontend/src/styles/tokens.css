@@ -1,0 +1,89 @@
+/* ============================================================
+   设计令牌层 —— frontend/DESIGN.md 全量映射(Supabase 风格设计语言)
+   命名: --apr-<token>; 修改必须与 DESIGN.md 保持同步
+   ============================================================ */
+:root {
+  /* ---------- 颜色 · 品牌与主色 ---------- */
+  --apr-primary: #3ecf8e;          /* 翡翠绿: 唯一品牌主色, 仅用于实心CTA/点缀 */
+  --apr-primary-deep: #24b47e;     /* 按压态 */
+  --apr-primary-soft: #4ade80;     /* 悬停态/图表点缀 */
+  --apr-on-primary: #171717;       /* 绿钮上的墨色字(招牌规则: 不是白色!) */
+
+  /* ---------- 颜色 · 文本墨色阶梯 ---------- */
+  --apr-ink: #171717;              /* 正文, 近黑非纯黑 */
+  --apr-ink-secondary: #212121;
+  --apr-ink-mute: #707070;        /* 次要文本 */
+  --apr-ink-mute-2: #9a9a9a;      /* 三级文本 */
+  --apr-ink-faint: #b2b2b2;       /* 禁用/占位 */
+
+  /* ---------- 颜色 · 画布表面 ---------- */
+  --apr-canvas: #ffffff;           /* 默认页面底色 */
+  --apr-canvas-soft: #fafafa;      /* 交替分区微底色 */
+  --apr-canvas-night: #1c1c1c;     /* 暗面(代码块/暗卡/大屏预留) */
+  --apr-canvas-night-soft: #202020;/* 暗面嵌套层 */
+  --apr-on-dark: #ffffff;          /* 暗面上的文字 */
+
+  /* ---------- 颜色 · 发丝线灰阶 ---------- */
+  --apr-hairline: #dfdfdf;         /* 卡片/表格 1px 边框 */
+  --apr-hairline-strong: #c7c7c7;  /* 强调边框 */
+  --apr-hairline-cool: #ededed;
+  --apr-hairline-cool-2: #efefef;
+  --apr-hairline-cool-3: #d4d4d4;
+
+  /* ---------- 颜色 · 点缀色(DESIGN.md 规定: 仅用于图表与标识, 永不作系统色) ---------- */
+  --apr-accent-purple: #6b01c2;
+  --apr-accent-purple-soft: #eddbf9;
+  --apr-accent-violet: #644fc1;
+  --apr-accent-yellow: #ffdb13;
+  --apr-accent-tomato: #ff2201;
+  --apr-accent-pink: #c7007e;
+  --apr-accent-indigo: #054cff;
+  --apr-accent-crimson: #e2005a;
+
+  /* ---------- 字体族 ---------- */
+  --apr-font-family: Inter, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei',
+    'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --apr-font-mono: ui-monospace, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+
+  /* ---------- 字阶(字号/行高/字距, weight 统一 500 展示层 + 400 正文层) ---------- */
+  --apr-fs-display-xxl: 64px;  --apr-lh-display-xxl: 1.1;  --apr-ls-display-xxl: -1.92px;
+  --apr-fs-display-xl: 48px;   --apr-lh-display-xl: 1.1;   --apr-ls-display-xl: -1.44px;
+  --apr-fs-display-lg: 36px;   --apr-lh-display-lg: 1.15;  --apr-ls-display-lg: -0.72px;
+  --apr-fs-display-md: 28px;   --apr-lh-display-md: 1.2;   --apr-ls-display-md: -0.42px;
+  --apr-fs-heading-lg: 22px;   --apr-lh-heading-lg: 1.2;
+  --apr-fs-heading-md: 18px;   --apr-lh-heading-md: 1.4;
+  --apr-fs-body-lg: 18px;      --apr-lh-body-lg: 1.55;
+  --apr-fs-body-md: 16px;      --apr-lh-body-md: 1.5;
+  --apr-fs-button-md: 14px;    --apr-lh-button-md: 1.0;
+  --apr-fs-caption: 13px;      --apr-lh-caption: 1.45;
+  --apr-fs-micro: 12px;        --apr-lh-micro: 1.45;
+  --apr-fs-code: 14px;         --apr-lh-code: 1.5;
+
+  /* ---------- 间距(8px 基准) ---------- */
+  --apr-space-xxs: 2px;
+  --apr-space-xs: 4px;
+  --apr-space-sm: 8px;
+  --apr-space-md: 12px;
+  --apr-space-lg: 16px;
+  --apr-space-xl: 24px;
+  --apr-space-xxl: 32px;
+  --apr-space-huge: 64px;
+
+  /* ---------- 圆角 ---------- */
+  --apr-radius-xs: 4px;     /* 输入框/发丝标签 */
+  --apr-radius-sm: 6px;     /* 按钮(招牌方角, 永不胶囊形)与代码块 */
+  --apr-radius-md: 8px;     /* 紧凑卡片/告警 */
+  --apr-radius-lg: 12px;    /* 特性卡/定价卡/产品mockup */
+  --apr-radius-xl: 16px;    /* 模态框 */
+  --apr-radius-full: 9999px;/* 药丸标签/头像 */
+
+  /* ---------- 阴影(海拔) ---------- */
+  --apr-shadow-1: 0 1px 3px rgba(0, 0, 0, 0.06);     /* 卡片微抬升 */
+  --apr-shadow-2: 0 8px 24px rgba(0, 0, 0, 0.08);    /* 悬浮面板 */
+  --apr-shadow-3: 0 16px 48px rgba(0, 0, 0, 0.12);   /* 模态/深层 */
+
+  /* ---------- 断点(文档参考; 媒体查询中需写像素字面量) ---------- */
+  --apr-bp-wide: 1440px;    /* Wide ≥1440 */
+  --apr-bp-desktop: 1024px; /* Desktop 1024–1440 */
+  --apr-bp-tablet: 768px;   /* Tablet 768–1023, Mobile <768 */
+}

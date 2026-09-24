@@ -1,0 +1,6 @@
+/* 字体方案(M2 推荐) —— Inter(拉丁) + Noto Sans SC(中文), 均由 npm 本地打包
+   (吸取 echarts CDN 证书过期教训: 运行时不依赖任何外网字体 CDN) */
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/noto-sans-sc/400.css";
+@import "@fontsource/noto-sans-sc/500.css";

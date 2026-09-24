@@ -1,0 +1,64 @@
+/* 全局基础样式 —— body 默认 body-md(16px/1.5), 白画布, 1280px 容器 */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--apr-canvas);
+  color: var(--apr-ink);
+  font-family: var(--apr-font-family);
+  font-size: var(--apr-fs-body-md);
+  line-height: var(--apr-lh-body-md);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ---------- 版式工具类(字阶, 供规范页与后续页面复用) ---------- */
+.t-display-xxl { font-size: var(--apr-fs-display-xxl); font-weight: 500; line-height: var(--apr-lh-display-xxl); letter-spacing: var(--apr-ls-display-xxl); }
+.t-display-xl  { font-size: var(--apr-fs-display-xl);  font-weight: 500; line-height: var(--apr-lh-display-xl);  letter-spacing: var(--apr-ls-display-xl); }
+.t-display-lg  { font-size: var(--apr-fs-display-lg);  font-weight: 500; line-height: var(--apr-lh-display-lg);  letter-spacing: var(--apr-ls-display-lg); }
+.t-display-md  { font-size: var(--apr-fs-display-md);  font-weight: 500; line-height: var(--apr-lh-display-md);  letter-spacing: var(--apr-ls-display-md); }
+.t-heading-lg  { font-size: var(--apr-fs-heading-lg);  font-weight: 500; line-height: var(--apr-lh-heading-lg); }
+.t-heading-md  { font-size: var(--apr-fs-heading-md);  font-weight: 500; line-height: var(--apr-lh-heading-md); }
+.t-body-lg     { font-size: var(--apr-fs-body-lg); font-weight: 400; line-height: var(--apr-lh-body-lg); }
+.t-body-md     { font-size: var(--apr-fs-body-md); font-weight: 400; line-height: var(--apr-lh-body-md); }
+.t-caption     { font-size: var(--apr-fs-caption); font-weight: 400; line-height: var(--apr-lh-caption); color: var(--apr-ink-mute); }
+.t-micro       { font-size: var(--apr-fs-micro); font-weight: 400; line-height: var(--apr-lh-micro); color: var(--apr-ink-mute-2); }
+.t-code        { font-family: var(--apr-font-mono); font-size: var(--apr-fs-code); line-height: var(--apr-lh-code); }
+
+/* ---------- 容器与分区 ---------- */
+.apr-container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 var(--apr-space-xl);
+}
+
+.apr-section {
+  padding: var(--apr-space-huge) 0;
+  border-top: 1px solid var(--apr-hairline-cool);
+}
+
+/* ---------- 展示层响应式降阶(64→48/36) ---------- */
+@media (max-width: 1023px) {
+  .t-display-xxl { font-size: 48px; letter-spacing: -1.44px; }
+  .t-display-xl { font-size: 36px; letter-spacing: -0.72px; }
+}
+
+@media (max-width: 767px) {
+  .apr-container { padding: 0 var(--apr-space-lg); }
+  .apr-section { padding: var(--apr-space-xxl) 0; }
+  .t-display-xxl { font-size: 36px; letter-spacing: -0.72px; }
+  .t-display-xl { font-size: 28px; letter-spacing: -0.42px; }
+  .t-display-lg { font-size: 28px; letter-spacing: -0.42px; }
+}

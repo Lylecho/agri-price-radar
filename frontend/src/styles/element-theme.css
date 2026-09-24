@@ -1,0 +1,52 @@
+/* Element Plus 主题定制 —— 把默认蓝色体系覆盖为 DESIGN.md 品牌规则
+   核心: ① primary→翡翠绿  ② 绿钮文字用墨色(非白)  ③ 按钮圆角 6px 方角
+   说明: DESIGN.md 只定义 default/pressed 两态; 悬停取 primary-soft(更亮),
+   按压取 primary-deep(更深), 符合"lit surface"隐喻 */
+:root {
+  /* 主色及其派生(与白混合的浅阶, 供 EP 内部 hover/禁用等状态取用) */
+  --el-color-primary: #3ecf8e;
+  --el-color-primary-dark-2: #24b47e;   /* pressed */
+  --el-color-primary-light-3: #78ddb0;
+  --el-color-primary-light-5: #9fe7c7;
+  --el-color-primary-light-7: #c5f1dd;
+  --el-color-primary-light-8: #d8f5e8;
+  --el-color-primary-light-9: #ecfaf4;
+
+  /* 文本墨色阶梯 */
+  --el-text-color-primary: #171717;
+  --el-text-color-regular: #171717;
+  --el-text-color-secondary: #707070;
+  --el-text-color-placeholder: #b2b2b2;
+  --el-text-color-disabled: #b2b2b2;
+
+  /* 边框发丝线 */
+  --el-border-color: #dfdfdf;
+  --el-border-color-light: #ededed;
+  --el-border-color-lighter: #efefef;
+  --el-border-color-extra-light: #fafafa;
+
+  /* 圆角与字体 */
+  --el-border-radius-base: 6px;   /* 按钮/输入框 → 招牌 6px */
+  --el-border-radius-small: 4px;
+  --el-font-family: var(--apr-font-family);
+}
+
+/* 招牌规则: 绿底配墨字(DESIGN.md "near-black on green"), 悬停亮绿/按压深绿 */
+.el-button--primary {
+  --el-button-text-color: var(--apr-on-primary);
+  --el-button-hover-text-color: var(--apr-on-primary);
+  --el-button-active-text-color: var(--apr-on-primary);
+  --el-button-hover-bg-color: var(--apr-primary-soft);
+  --el-button-hover-border-color: var(--apr-primary-soft);
+  --el-button-active-bg-color: var(--apr-primary-deep);
+  --el-button-active-border-color: var(--apr-primary-deep);
+  font-weight: 500;
+}
+
+/* 触控目标: 移动端按钮/表单 ≥36px (DESIGN.md Responsive 节) */
+@media (max-width: 767px) {
+  .el-button,
+  .el-input__wrapper {
+    min-height: 36px;
+  }
+}

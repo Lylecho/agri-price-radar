@@ -1,0 +1,19 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 数据库与数据文件(可随时用采集脚本重建)
+python/data/
+
+# demo 生成物与前端vendor缓存(可重建)
+demo/price_demo.html
+demo/echarts.min.js
+
+# 前端构建产物与依赖
+frontend/node_modules/
+frontend/dist/
+
+# 日志与系统文件
+*.log
+.DS_Store
+Thumbs.db
