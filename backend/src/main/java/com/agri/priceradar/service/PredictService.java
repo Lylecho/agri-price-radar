@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Comparator;
 
 /**
  * 预测查询服务 —— 只读 predict_result 预计算表（蓝图 §7 双通道之日常通道）
@@ -36,6 +37,7 @@ public class PredictService {
         }
         List<PredictResult> rows = predictMapper.selectByCategoryAndModel(category, model);
         List<PredictPointVO> points = rows.stream()
+                .sorted(Comparator.comparing(PredictResult::getPredictDate))
                 .map(r -> new PredictPointVO(r.getPredictDate().toString(), r.getYhat()))
                 .toList();
         BigDecimal mapeTest = rows.isEmpty() ? null : rows.get(0).getMapeTest();

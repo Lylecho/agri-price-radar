@@ -2,6 +2,7 @@ package com.agri.priceradar.controller;
 
 import com.agri.priceradar.common.Result;
 import com.agri.priceradar.dto.LoginRequest;
+import com.agri.priceradar.dto.ChangePasswordRequest;
 import com.agri.priceradar.service.AuthService;
 import com.agri.priceradar.vo.LoginVO;
 import jakarta.validation.Valid;
@@ -36,5 +37,13 @@ public class AuthController {
     public Result<LoginVO> me(Authentication authentication) {
         String userId = authentication == null ? null : authentication.getName();
         return Result.ok(authService.current(userId));
+    }
+
+    /** 首次登录及日常改密均使用此接口。 */
+    @PostMapping("/change-password")
+    public Result<Void> changePassword(Authentication authentication,
+                                       @Valid @RequestBody ChangePasswordRequest request) {
+        authService.changePassword(authentication == null ? null : authentication.getName(), request);
+        return Result.ok(null);
     }
 }

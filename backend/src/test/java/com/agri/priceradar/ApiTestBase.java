@@ -1,6 +1,11 @@
 package com.agri.priceradar;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import java.util.UUID;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -27,6 +32,42 @@ abstract class ApiTestBase {
     @Autowired
     protected ObjectMapper objectMapper;
 
+    @Autowired
+    protected JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    protected PasswordEncoder passwordEncoder;
+
+    protected String testAdmin;
+    protected String testDataAdmin;
+
+    /** 每例使用独立账号，避免已标记首次改密的演示账号干扰回归测试。 */
+    @BeforeEach
+    void createTestUsers() {
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        testAdmin = "test_admin_" + suffix;
+        testDataAdmin = "test_data_" + suffix;
+        createUser(testAdmin, "ADMIN");
+        createUser(testDataAdmin, "DATA_ADMIN");
+    }
+
+    private void createUser(String username, String role) {
+        jdbcTemplate.update("INSERT INTO sys_user (username, password, nickname, status) VALUES (?, ?, ?, 1)",
+                username, passwordEncoder.encode("admin123"), username);
+        jdbcTemplate.update("INSERT INTO sys_user_role (user_id, role_id) " +
+                "SELECT u.id, r.id FROM sys_user u JOIN sys_role r ON r.code = ? WHERE u.username = ?",
+                role, username);
+    }
+
+    @AfterEach
+    void removeTestUsers() {
+        for (String username : new String[]{testAdmin, testDataAdmin}) {
+            if (username == null) continue;
+            jdbcTemplate.update("DELETE ur FROM sys_user_role ur JOIN sys_user u ON u.id = ur.user_id WHERE u.username = ?", username);
+            jdbcTemplate.update("DELETE FROM sys_user WHERE username = ?", username);
+        }
+    }
+
     /** 登录并返回 JWT; 失败返回 null */
     protected String login(String username, String password) throws Exception {
         String body = objectMapper.writeValueAsString(Map.of("username", username, "password", password));
@@ -41,12 +82,12 @@ abstract class ApiTestBase {
 
     /** 管理员令牌（ADMIN） */
     protected String adminToken() throws Exception {
-        return login("admin", "admin123");
+        return login(testAdmin, "admin123");
     }
 
     /** 数据管理员令牌（DATA_ADMIN） */
     protected String dataAdminToken() throws Exception {
-        return login("dataadmin", "dataadmin123");
+        return login(testDataAdmin, "admin123");
     }
 
     protected String bearer(String token) {

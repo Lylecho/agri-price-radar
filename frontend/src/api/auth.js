@@ -9,3 +9,8 @@ export function login(data) {
 export function fetchMe() {
   return request.get('/api/auth/me')
 }
+
+/** 当前用户修改密码 */
+export function changePassword(data) {
+  return request.post('/api/auth/change-password', data)
+}

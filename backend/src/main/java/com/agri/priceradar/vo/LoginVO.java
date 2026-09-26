@@ -10,5 +10,5 @@ package com.agri.priceradar.vo;
  * @param expireSeconds 令牌有效期（秒）
  */
 public record LoginVO(String token, String username, String nickname,
-                      String role, long expireSeconds) {
+                      String role, long expireSeconds, boolean mustChangePwd) {
 }

@@ -26,6 +26,7 @@ class AuthApiIntegrationTest extends ApiTestBase {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.token").isNotEmpty())
                 .andExpect(jsonPath("$.data.role").value("ADMIN"))
+                .andExpect(jsonPath("$.data.mustChangePwd").value(true))
                 .andExpect(jsonPath("$.data.expireSeconds").isNumber());
     }
 
@@ -36,7 +37,8 @@ class AuthApiIntegrationTest extends ApiTestBase {
                         .content("{\"username\":\"dataadmin\",\"password\":\"dataadmin123\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.role").value("DATA_ADMIN"));
+                .andExpect(jsonPath("$.data.role").value("DATA_ADMIN"))
+                .andExpect(jsonPath("$.data.mustChangePwd").value(true));
     }
 
     @Test
@@ -111,7 +113,47 @@ class AuthApiIntegrationTest extends ApiTestBase {
         mockMvc.perform(get("/api/auth/me").header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.username").value("admin"))
+                .andExpect(jsonPath("$.data.username").value(testAdmin))
                 .andExpect(jsonPath("$.data.role").value("ADMIN"));
+    }
+
+    @Test
+    @DisplayName("首次登录须先改密，改密后业务接口可用且旧密码失效")
+    void firstLoginMustChangePassword() throws Exception {
+        jdbcTemplate.update("UPDATE sys_user SET must_change_pwd = 1 WHERE username = ?", testAdmin);
+        String token = adminToken();
+        mockMvc.perform(get("/api/auth/me").header("Authorization", bearer(token)))
+                .andExpect(jsonPath("$.data.mustChangePwd").value(true));
+        mockMvc.perform(get("/api/price/categories").header("Authorization", bearer(token)))
+                .andExpect(jsonPath("$.code").value(403))
+                .andExpect(jsonPath("$.msg").value("请先修改初始密码"));
+        mockMvc.perform(post("/api/auth/change-password")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"oldPassword\":\"admin123\",\"newPassword\":\"new-password-123\"}"))
+                .andExpect(jsonPath("$.code").value(200));
+        mockMvc.perform(get("/api/price/categories").header("Authorization", bearer(token)))
+                .andExpect(jsonPath("$.code").value(200));
+        org.junit.jupiter.api.Assertions.assertNull(login(testAdmin, "admin123"));
+        org.junit.jupiter.api.Assertions.assertNotNull(login(testAdmin, "new-password-123"));
+    }
+
+    @Test
+    @DisplayName("原密码错误或新密码相同不能解除首次改密限制")
+    void badPasswordChangeShouldStayBlocked() throws Exception {
+        jdbcTemplate.update("UPDATE sys_user SET must_change_pwd = 1 WHERE username = ?", testAdmin);
+        String token = adminToken();
+        mockMvc.perform(post("/api/auth/change-password")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"oldPassword\":\"wrong-pass\",\"newPassword\":\"new-password-123\"}"))
+                .andExpect(jsonPath("$.code").value(400));
+        mockMvc.perform(post("/api/auth/change-password")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"oldPassword\":\"admin123\",\"newPassword\":\"admin123\"}"))
+                .andExpect(jsonPath("$.code").value(400));
+        mockMvc.perform(get("/api/price/categories").header("Authorization", bearer(token)))
+                .andExpect(jsonPath("$.code").value(403));
     }
 }

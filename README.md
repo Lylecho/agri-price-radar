@@ -126,7 +126,7 @@ CREATE TABLE collect_log (
 
 `sys_user` / `sys_role` / `sys_user_role` 三表已在 W2.1 建好并预置账号（DDL 见 `backend/sql/w2_auth.sql`，BCrypt 存储）：
 - 角色：`ADMIN`（超级管理员）/ `DATA_ADMIN`（数据管理员）
-- 预置账号（**仅开发环境**）：`admin`/`admin123`、`dataadmin`/`dataadmin123`，首次登录强制改密（顺延）
+- 预置账号（**仅开发环境**）：`admin`/`admin123`、`dataadmin`/`dataadmin123`；W3 迁移 `backend/sql/w3_password.sql` 增加 `must_change_pwd`，仅标记仍使用预置密码摘要的账号，首次登录必须改密。
 - 仍预留：`op_log`（操作审计）
 
 **预警两表（W2.2 落地, DDL 见 `backend/sql/w22_alert.sql`）**：
@@ -164,7 +164,8 @@ CREATE TABLE alert_record (            -- 预警触发记录(同品类+指标+�
 | 状态 | 方法 | 路径 | 说明 | 权限 |
 |---|---|---|---|---|
 | ✅ | POST | /api/auth/login | JWT 登录（返回 token + 角色） | 公开 |
-| ✅ | GET | /api/auth/me | 当前登录用户（刷新校验登录态） | 登录 |
+| ✅ | GET | /api/auth/me | 当前登录用户（含 mustChangePwd） | 登录 |
+| ✅ | POST | /api/auth/change-password | 当前用户改密，成功后解除首次改密限制 | 登录 |
 | ✅ | GET | /api/price/categories | 品类列表+代表品名+最新价+单位 | 登录 |
 | ✅ | GET | /api/price/trend?category=&days= | 日度均价序列（days 1–1095） | 登录 |
 | ✅ | GET | /api/price/change?category= | 最新日环比（红涨绿跌） | 登录 |
@@ -241,8 +242,7 @@ agri-price-radar/
 | — | 前端设计系统（令牌/EP主题/组件/规范页/单位治理） | ✅ 2026-09-24（v0.3.0） |
 | **W1** | **采集服务化：DDL v2 迁移 + 增量采集 + APScheduler 定时 + MySQL 切换 + predict_result 预计算 + collect_log** | ✅ 2026-09-24（本地完成，待推送） |
 | W2 | SpringBoot 后端：§6 接口 + JWT/RBAC + Redis | ✅ W2.1+W2.2 完成（鉴权/预警/触发/告警测试） |
-| W3 | Vue3 管理端（品类管理/趋势/预测/任务日志页） | ▶ 登录+看板+采集监控+预警配置 已交付; 品类管理/改密待补 |
-| W3 | Vue3 管理端（品类管理/趋势/预测/任务日志页） | 待启动 |
+| W3 | Vue3 管理端（品类管理/趋势/预测/任务日志页） | ▶ 登录、看板、采集监控、预警配置、首次改密已交付；品类管理与操作审计待补 |
 | W4 | 算法升级：Prophet 对比、MAPE 准入、FastAPI /ml 通道 | 待启动 |
 | W5 | Dify 智能问答 + 1920×1080 可视化大屏（canvas-night） | 待启动 |
 
@@ -289,6 +289,7 @@ agri-price-radar/
 - [x] W2.2：前端基础设施（axios 封装/401 拦截/Pinia/路由守卫）+ 登录页 + 数据看板 + 采集监控 + 预警配置
 - [x] W2.2：Python 冒烟测试 11 例全绿
 - [x] W2.2：生产 profile 关闭 SQL 打印
-- [ ] W3：品类管理、首次登录强制改密、操作审计（op_log）
+- [x] W3：首次登录强制改密（sys_user 标记 + 服务端拦截 + 改密接口与页面；后端 32 例全绿）
+- [ ] W3：品类管理、操作审计（op_log）
 - [ ] W4：Prophet 对比、MAPE 准入阈值、FastAPI /ml 实时通道
 - [ ] W5：Dify 智能问答 + 1920×1080 可视化大屏

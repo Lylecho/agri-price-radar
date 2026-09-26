@@ -28,6 +28,9 @@ public class SysUser {
     /** 1 启用 / 0 禁用 */
     private Integer status;
 
+    /** 1 表示须先修改预置密码 */
+    private Integer mustChangePwd;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;

@@ -1,6 +1,11 @@
 package com.agri.priceradar.security;
 
 import io.jsonwebtoken.Claims;
+import com.agri.priceradar.mapper.SysUserMapper;
+import com.agri.priceradar.entity.SysUser;
+import com.agri.priceradar.common.Result;
+import com.agri.priceradar.common.ResultCode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,9 +33,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private static final String PREFIX = "Bearer ";
 
     private final JwtUtil jwtUtil;
+    private final SysUserMapper sysUserMapper;
+    private final ObjectMapper objectMapper;
 
-    public JwtAuthFilter(JwtUtil jwtUtil) {
+    public JwtAuthFilter(JwtUtil jwtUtil, SysUserMapper sysUserMapper, ObjectMapper objectMapper) {
         this.jwtUtil = jwtUtil;
+        this.sysUserMapper = sysUserMapper;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -53,6 +62,23 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 // 令牌无效不算异常流程: 记录后继续, 由授权规则决定是否 401
                 log.debug("JWT 校验失败: {}", e.getMessage());
                 SecurityContextHolder.clearContext();
+            }
+        }
+        // 服务端强制改密：旧令牌也不能绕过，只允许查询本人信息和提交改密。
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null) {
+            SysUser user = sysUserMapper.selectById(Long.valueOf(authentication.getName()));
+            if (user == null || user.getStatus() == null || user.getStatus() != 1) {
+                SecurityContextHolder.clearContext();
+            } else if (Integer.valueOf(1).equals(user.getMustChangePwd())
+                    && !request.getRequestURI().equals("/api/auth/login")
+                    && !request.getRequestURI().equals("/api/auth/me")
+                    && !request.getRequestURI().equals("/api/auth/change-password")) {
+                response.setStatus(HttpServletResponse.SC_OK);
+                response.setContentType("application/json;charset=UTF-8");
+                response.getWriter().write(objectMapper.writeValueAsString(
+                        Result.fail(ResultCode.FORBIDDEN, "请先修改初始密码")));
+                return;
             }
         }
         filterChain.doFilter(request, response);

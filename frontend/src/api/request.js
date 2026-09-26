@@ -48,6 +48,9 @@ request.interceptors.response.use(
       redirectToLogin()
       return Promise.reject(new Error(body.msg || '未登录'))
     }
+    if (body.code === 403 && body.msg === '请先修改初始密码' && window.location.pathname !== '/change-password') {
+      window.location.href = '/change-password'
+    }
     ElMessage.error(body.msg || '请求失败')
     return Promise.reject(new Error(body.msg || '请求失败'))
   },

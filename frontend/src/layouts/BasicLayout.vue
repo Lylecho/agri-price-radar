@@ -17,6 +17,7 @@ const menus = computed(() => {
     { path: '/collect', label: '采集监控', admin: false },
     { path: '/alert', label: '预警配置', admin: true },
     { path: '/style-guide', label: '设计规范', admin: false },
+    { path: '/change-password', label: '修改密码', admin: false },
   ]
   return list.filter((m) => !m.admin || userStore.isAdmin)
 })

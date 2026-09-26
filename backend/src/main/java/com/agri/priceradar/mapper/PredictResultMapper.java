@@ -21,7 +21,7 @@ public interface PredictResultMapper extends BaseMapper<PredictResult> {
 
     /** 指定品类+模型的预测序列 */
     @Select("SELECT * FROM predict_result WHERE category = #{category} AND model = #{model} " +
-            "ORDER BY predict_date")
+            "ORDER BY predict_date DESC LIMIT 7")
     List<PredictResult> selectByCategoryAndModel(@Param("category") String category,
                                                  @Param("model") String model);
 }

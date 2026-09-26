@@ -10,6 +10,8 @@ export const useUserStore = defineStore('user', {
     username: '',
     nickname: '',
     role: '',
+    mustChangePwd: false,
+    profileLoaded: false,
   }),
 
   getters: {
@@ -26,6 +28,8 @@ export const useUserStore = defineStore('user', {
       this.username = data.username
       this.nickname = data.nickname || data.username
       this.role = data.role
+      this.mustChangePwd = !!data.mustChangePwd
+      this.profileLoaded = true
       localStorage.setItem('apr_token', data.token)
       localStorage.setItem('apr_user', JSON.stringify({ username: data.username, role: data.role }))
       return data
@@ -37,6 +41,8 @@ export const useUserStore = defineStore('user', {
       this.username = data.username
       this.nickname = data.nickname || data.username
       this.role = data.role
+      this.mustChangePwd = !!data.mustChangePwd
+      this.profileLoaded = true
       return data
     },
 
@@ -45,6 +51,8 @@ export const useUserStore = defineStore('user', {
       this.username = ''
       this.nickname = ''
       this.role = ''
+      this.mustChangePwd = false
+      this.profileLoaded = false
       localStorage.removeItem('apr_token')
       localStorage.removeItem('apr_user')
     },

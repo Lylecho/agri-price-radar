@@ -41,7 +41,7 @@ ON DUPLICATE KEY UPDATE name = VALUES(name), remark = VALUES(remark);
 INSERT INTO sys_user (username, password, nickname, status) VALUES
     ('admin',     '$2b$10$PLVH3Wo0A6SMC9l5Ap/CNeBxdnXbOuKs4XEHT6PV1pbV5j.8guUgy', '超级管理员', 1),
     ('dataadmin', '$2b$10$Jj9gm40vahxNSAerDBnDYuKsoqyLTx0LTMrRU5j13wXiW4yNDG0IG', '数据管理员', 1)
-ON DUPLICATE KEY UPDATE password = VALUES(password), nickname = VALUES(nickname), status = VALUES(status);
+ON DUPLICATE KEY UPDATE nickname = VALUES(nickname), status = VALUES(status);
 
 -- ---------------- 绑定用户-角色 ----------------
 INSERT INTO sys_user_role (user_id, role_id)

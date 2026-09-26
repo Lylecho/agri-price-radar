@@ -21,7 +21,8 @@ npm run preview            :: 预览构建产物 http://localhost:4173
 
 | 路由 | 页面 | 说明 | 可访问角色 |
 |---|---|---|---|
-| `/login` | 登录 | JWT 登录, 失败提示 | 公开 |
+| `/login` | 登录 | JWT 登录, 失败提示；需改密时跳转改密页 | 公开 |
+| `/change-password` | 修改密码 | 首登强制改密及日常改密 | 登录用户 |
 | `/dashboard` | 数据看板 | 五品类卡片(最新价+环比红涨绿跌) + 趋势图(90天/1年/3年) + 未来7天预测(虚线+MAPE+**免责声明**) | 登录用户 |
 | `/collect` | 采集监控 | 各品类数据量与跨度 + 任务日志分页 + 手动触发采集 | 登录用户（触发按钮仅后端鉴权） |
 | `/alert` | 预警配置 | 预警规则阈值维护 + 预警记录列表 | 规则修改仅 ADMIN |
@@ -36,7 +37,7 @@ src/
 ├─ stores/       Pinia (user: token/角色, localStorage 持久化)
 ├─ router/       路由 + 登录守卫(未登录跳 /login)
 ├─ layouts/      BasicLayout(侧边栏按角色渲染 + 顶栏用户/退出)
-├─ views/        Login / Dashboard / CollectMonitor / AlertConfig / StyleGuide
+├─ views/        Login / ChangePassword / Dashboard / CollectMonitor / AlertConfig / StyleGuide
 ├─ components/
 │  ├─ ui/        品牌组件(AppButton/AppCard/AppPill/AppCodeBlock)
 │  └─ charts/    ECharts 封装(TrendChart 多系列折线, PredictChart 历史+预测虚线)
@@ -50,8 +51,8 @@ src/
 - **涨跌配色**：红涨绿跌（中国惯例），见 `Dashboard.vue` 的 `changeColor`。
 - **离线可用**：ECharts/字体均本地打包, 不依赖外部 CDN（曾发生 pyecharts CDN 证书过期事故）。
 
-## 五、待办（W3 收尾）
+## 五、W3 状态与自测
 
 - 品类管理页（新增/编辑关注品类）
-- 首次登录强制改密
+- 首次改密已完成：运行一次 W3 数据库迁移，使用仍为预置密码的账号登录，应被引导到 `/change-password`；改密前访问 `/dashboard` 会被拦截。
 - 大屏（1920×1080, canvas-night 暗色系, 蓝图 M3 决策）

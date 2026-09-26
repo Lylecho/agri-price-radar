@@ -38,7 +38,8 @@ D:\Program\tools\apache-maven-3.9.16\bin\mvn.cmd -s maven-settings.xml test
 | 方法 | 路径 | 说明 | 权限 |
 |---|---|---|---|
 | POST | `/api/auth/login` | 登录, 返回 token/角色/有效期 | 公开 |
-| GET | `/api/auth/me` | 当前登录用户 | 登录 |
+| GET | `/api/auth/me` | 当前登录用户（含 mustChangePwd） | 登录 |
+| POST | `/api/auth/change-password` | 校验原密码后修改，解除首次改密限制 | 登录 |
 
 **业务（W2.1，W2.2 起需登录）**
 
@@ -91,6 +92,7 @@ Invoke-RestMethod "$base/api/alert/rules" -Headers $h
 
 - 业务表由 Python 侧写入：`price_daily`(26,193 行) / `predict_result`(35 行) / `collect_log`
 - 权限三表：`python python/scripts/run_sql.py backend/sql/w2_auth.sql`
+- W3 首次改密迁移（**只执行一次**）：`python python/scripts/run_sql.py backend/sql/w3_password.sql`。迁移仅标记仍使用预置密码摘要的账号；迁移前备份 `sys_user`。
 - 预警两表：`python python/scripts/run_sql.py backend/sql/w22_alert.sql`
 - 预置账号（**仅开发环境**）：`admin`/`admin123`、`dataadmin`/`dataadmin123`（BCrypt）
 
@@ -101,14 +103,14 @@ set APR_MYSQL_PWD=你的MySQL密码
 D:\Program\tools\apache-maven-3.9.16\bin\mvn.cmd -s maven-settings.xml test
 ```
 
-共 **30 例**（需 MySQL 可达且已执行两个 SQL 脚本）：
+共 **32 例**（需 MySQL 可达且已执行 `w2_auth.sql`、`w22_alert.sql`、`w3_password.sql`）：
 - `CategoryCatalogTest`(3)：品类映射与单位治理结论
 - `PriceApiIntegrationTest`(8)：价格/预测接口 + 参数校验
-- `AuthApiIntegrationTest`(10)：登录成功/失败/无令牌/非法令牌/角色访问/当前用户
+- `AuthApiIntegrationTest`(12)：登录成功/失败/无令牌/非法令牌/角色访问/当前用户/首次改密强制校验
 - `AlertApiIntegrationTest`(9)：规则列表/阈值修改/**越权 403**/非法值 400/不存在 404/记录/概览/手动触发
 
-## 七、待办（W3）
+## 七、W3 状态与自测
 
-- 首次登录强制改密（`sys_user` 增 `must_change_pwd` 字段）
+- 首次改密验收：预置账号登录返回 `mustChangePwd=true`；改密前业务接口返回 403，`/api/auth/me` 与 `/api/auth/change-password` 可访问；改密成功后旧密码失效。
 - 操作审计 `op_log`
 - Redis 缓存接入（本机未安装, 当前无状态 JWT 与内存缓存已满足需求）

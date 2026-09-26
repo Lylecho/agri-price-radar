@@ -25,7 +25,7 @@ async function onSubmit() {
   try {
     const data = await userStore.login({ username: form.username, password: form.password })
     ElMessage.success(`欢迎, ${data.nickname || data.username}`)
-    router.push(route.query.redirect || '/dashboard')
+    router.push(data.mustChangePwd ? '/change-password' : (route.query.redirect || '/dashboard'))
   } catch (e) {
     errorMsg.value = e.message || '登录失败'
   } finally {
@@ -61,7 +61,7 @@ async function onSubmit() {
             />
           </label>
           <p v-if="errorMsg" class="error t-caption">{{ errorMsg }}</p>
-          <AppButton variant="primary" :disabled="loading" @click="onSubmit">
+          <AppButton type="button" variant="primary" :disabled="loading" @click="onSubmit">
             {{ loading ? '登录中…' : '登录' }}
           </AppButton>
           <p class="t-micro hint">开发环境预置账号：admin / admin123（超级管理员）</p>
