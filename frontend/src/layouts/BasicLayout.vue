@@ -15,6 +15,8 @@ const menus = computed(() => {
   const list = [
     { path: '/dashboard', label: '数据看板', admin: false },
     { path: '/collect', label: '采集监控', admin: false },
+    { path: '/categories', label: '品类管理', admin: false },
+    { path: '/oplog', label: '操作审计', admin: true },
     { path: '/alert', label: '预警配置', admin: true },
     { path: '/style-guide', label: '设计规范', admin: false },
     { path: '/change-password', label: '修改密码', admin: false },

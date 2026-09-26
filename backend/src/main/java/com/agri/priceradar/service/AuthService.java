@@ -1,5 +1,8 @@
 package com.agri.priceradar.service;
 
+import com.agri.priceradar.aspect.Audited;
+import com.agri.priceradar.aspect.AuditAction;
+
 import com.agri.priceradar.common.BizException;
 import com.agri.priceradar.common.ResultCode;
 import com.agri.priceradar.dto.LoginRequest;
@@ -34,10 +37,11 @@ public class AuthService {
         this.jwtUtil = jwtUtil;
     }
 
+    @Audited(AuditAction.LOGIN)
     public LoginVO login(LoginRequest request) {
         SysUser user = sysUserMapper.selectByUsername(request.username());
         if (user == null || !passwordEncoder.matches(request.password(), user.getPassword())) {
-            log.warn("登录失败: username={}", request.username());
+            log.warn("登录认证失败");
             throw new BizException(ResultCode.UNAUTHORIZED, "用户名或密码错误");
         }
         List<String> roles = sysUserMapper.selectRoleCodes(user.getId());
@@ -68,6 +72,7 @@ public class AuthService {
     }
 
     /** 当前用户改密；密码与限制标记原子更新。 */
+    @Audited(AuditAction.CHANGE_PASSWORD)
     public void changePassword(String userId, ChangePasswordRequest request) {
         if (userId == null) throw new BizException(ResultCode.UNAUTHORIZED, "未登录或登录已过期");
         SysUser user = sysUserMapper.selectById(Long.valueOf(userId));

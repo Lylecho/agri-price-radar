@@ -57,6 +57,7 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login").permitAll()
+                        .requestMatchers("/api/admin/oplog", "/api/admin/oplog/**").hasRole("ADMIN")
                         .requestMatchers("/api/admin/**").hasAnyRole("ADMIN", "DATA_ADMIN")
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll())

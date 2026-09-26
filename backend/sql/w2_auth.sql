@@ -1,7 +1,7 @@
 -- =====================================================================
 -- W2 · RBAC 权限三表 + 预置账号（蓝图 §5.4 → 落地）
--- 说明: 仅开发环境使用; 密码为 BCrypt 摘要(明文 admin123 / dataadmin123),
---       首次登录后强制改密(W2.2 实现)。可重复执行(幂等)。
+-- 说明: 密码摘要仅由环境变量 APR_ADMIN_PASSWORD_HASH / APR_DATA_ADMIN_PASSWORD_HASH 注入,
+--       首次登录强制改密由后续 w3_password.sql 迁移启用。可重复执行(幂等)。
 -- 执行: python python/scripts/run_sql.py backend/sql/w2_auth.sql
 -- =====================================================================
 
@@ -38,9 +38,12 @@ INSERT INTO sys_role (code, name, remark) VALUES
 ON DUPLICATE KEY UPDATE name = VALUES(name), remark = VALUES(remark);
 
 -- ---------------- 预置账号(BCrypt 摘要) ----------------
-INSERT INTO sys_user (username, password, nickname, status) VALUES
-    ('admin',     '$2b$10$PLVH3Wo0A6SMC9l5Ap/CNeBxdnXbOuKs4XEHT6PV1pbV5j.8guUgy', '超级管理员', 1),
-    ('dataadmin', '$2b$10$Jj9gm40vahxNSAerDBnDYuKsoqyLTx0LTMrRU5j13wXiW4yNDG0IG', '数据管理员', 1)
+INSERT INTO sys_user (username, password, nickname, status)
+SELECT 'admin', @apr_admin_password_hash, '超级管理员', 1 WHERE @apr_admin_password_hash IS NOT NULL
+ON DUPLICATE KEY UPDATE nickname = VALUES(nickname), status = VALUES(status);
+
+INSERT INTO sys_user (username, password, nickname, status)
+SELECT 'dataadmin', @apr_data_admin_password_hash, '数据管理员', 1 WHERE @apr_data_admin_password_hash IS NOT NULL
 ON DUPLICATE KEY UPDATE nickname = VALUES(nickname), status = VALUES(status);
 
 -- ---------------- 绑定用户-角色 ----------------

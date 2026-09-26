@@ -15,6 +15,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    private final com.agri.priceradar.service.OpLogService opLogs;
+
+    public GlobalExceptionHandler(com.agri.priceradar.service.OpLogService opLogs) {
+        this.opLogs = opLogs;
+    }
+
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(BizException.class)
@@ -24,7 +30,18 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public Result<Void> handleValid(MethodArgumentNotValidException e) {
+    public Result<Void> handleValid(MethodArgumentNotValidException e, jakarta.servlet.http.HttpServletRequest request) {
+        // 登录参数校验发生在服务调用之前，也须留下失败记录。
+        if (e.getBindingResult().getTarget() instanceof com.agri.priceradar.dto.LoginRequest login) {
+            var entry = new com.agri.priceradar.entity.OpLog();
+            entry.setUsername(login.username());
+            entry.setAction("LOGIN");
+            entry.setResult("FAILED");
+            entry.setTarget("登录认证");
+            entry.setDetail("登录参数校验失败");
+            entry.setIp(request.getRemoteAddr());
+            opLogs.writeSafely(entry);
+        }
         String msg = e.getBindingResult().getFieldErrors().stream()
                 .findFirst()
                 .map(f -> f.getField() + ": " + f.getDefaultMessage())

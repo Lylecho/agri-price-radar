@@ -86,6 +86,8 @@ CREATE TABLE price_daily (
 | 猪肉 | 白条猪 | 接口"猪肉"仅11条无关品，用户已确认替换 |
 | 鸡蛋 | 散鸡蛋 | 箱/筐鸡蛋为整件计价且斤标注被污染，散鸡蛋为纯斤价序列 |
 
+**品类管理形态（R1 锁定方案 B）**：管理端只读展示上述五品类映射、数据量/跨度、主导单位与单位检查结果；映射由 `CategoryCatalog` / `constants.py` 代码内同步维护，不新增配置表。
+
 **单位治理规则**：同轴对比仅取「主导单位=斤」的序列；整件价（箱/筐）单独展示或按规格折算；「斤」标注下价格超品类合理区间（如鸡蛋>15元/斤）视为上游错标，隔离告警。
 
 ### 5.2 predict_result —— 预测预计算表（W1）
@@ -122,12 +124,33 @@ CREATE TABLE collect_log (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时任务运行日志';
 ```
 
-### 5.4 权限、预警与审计（W2 落地）
+### 5.4 权限、预警与审计（W2/W3 落地）
 
 `sys_user` / `sys_role` / `sys_user_role` 三表已在 W2.1 建好并预置账号（DDL 见 `backend/sql/w2_auth.sql`，BCrypt 存储）：
 - 角色：`ADMIN`（超级管理员）/ `DATA_ADMIN`（数据管理员）
-- 预置账号（**仅开发环境**）：`admin`/`admin123`、`dataadmin`/`dataadmin123`；W3 迁移 `backend/sql/w3_password.sql` 增加 `must_change_pwd`，仅标记仍使用预置密码摘要的账号，首次登录必须改密。
-- 仍预留：`op_log`（操作审计）
+- 预置账号（**仅开发环境**）：`admin`、`dataadmin`（密码摘要由环境变量注入）；W3 迁移 `backend/sql/w3_password.sql` 增加 `must_change_pwd`，仅标记仍使用预置密码摘要的账号，首次登录必须改密。
+预置账号的 BCrypt 摘要分别由 `APR_ADMIN_PASSWORD_HASH` / `APR_DATA_ADMIN_PASSWORD_HASH` 注入 SQL 执行器，未提供时不创建账号。全新部署按 `w2_auth.sql` → `w22_alert.sql` → `w3_password.sql`（仅一次）→ `w3_oplog.sql` 执行；首次改密迁移需使用与初始化相同的摘要变量。已完成改密迁移的现有环境仅追加 `w3_oplog.sql`。
+
+**操作审计（W3/R1，`backend/sql/w3_oplog.sql`，可重复执行）**：
+
+```sql
+CREATE TABLE IF NOT EXISTS op_log (
+    id          BIGINT        PRIMARY KEY AUTO_INCREMENT COMMENT '自增主键',
+    user_id     BIGINT        NULL COMMENT '操作人ID，未认证时为空',
+    username    VARCHAR(32)   NOT NULL COMMENT '操作人或登录时提交的用户名',
+    action      VARCHAR(32)   NOT NULL COMMENT 'LOGIN/CHANGE_PASSWORD/UPDATE_ALERT_RULE/TRIGGER_COLLECT',
+    target      VARCHAR(128)  NULL COMMENT '目标账号、规则ID或采集任务',
+    result      VARCHAR(16)   NOT NULL COMMENT 'SUCCESS/FAILED',
+    detail      VARCHAR(1000) NULL COMMENT '安全摘要，不含密码、令牌或完整请求体',
+    ip          VARCHAR(45)   NULL COMMENT '请求来源IPv4或IPv6',
+    created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_username_time (username, created_at),
+    INDEX idx_action_time (action, created_at),
+    INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统操作审计日志';
+```
+
+审计覆盖 LOGIN、CHANGE_PASSWORD、UPDATE_ALERT_RULE、TRIGGER_COLLECT；采集动作只记录受理结果，异步执行结果仍见 `collect_log`。审计写入失败只记录告警，不影响主业务；用户名按 Unicode 字符截断至 32，摘要不记录密码、令牌或请求体。
 
 **预警两表（W2.2 落地, DDL 见 `backend/sql/w22_alert.sql`）**：
 
@@ -176,7 +199,8 @@ CREATE TABLE alert_record (            -- 预警触发记录(同品类+指标+�
 | ✅ | GET | /api/alert/records?page=&size= | 预警记录分页 | 登录 |
 | ✅ | GET | /api/alert/summary | 各品类触发次数概览 | 登录 |
 | ✅ | GET | /api/admin/collect/logs?page=&size= | collect_log 分页 | DATA_ADMIN / ADMIN |
-| ✅ | GET | /api/admin/collect/stats?category= | 各品类数据量/时间跨度 | DATA_ADMIN / ADMIN |
+| ✅ | GET | /api/admin/collect/stats?category= | 各品类数据量/时间跨度/主导单位/单位检查条数 | DATA_ADMIN / ADMIN |
+| ✅ | GET | /api/admin/oplog?page=&size=&username=&action= | 操作审计分页，用户名与动作精确筛选 | **ADMIN** |
 | ✅ | POST | /api/admin/collect/trigger | 手动触发一次增量采集（异步子进程） | DATA_ADMIN / ADMIN |
 | ⏳ | POST | /ml/forecast | FastAPI 实时预测 `{category, days}`（内网，可降级） | 内网 |
 
@@ -210,7 +234,7 @@ Windows 11 + Git Bash/cmd；Python 3.12.10（pip，清华镜像）；Node 22.19 
 - 计划任务（可选, 需管理员）：`powershell -ExecutionPolicy Bypass -File python/scheduler/register-task.ps1`（本机因权限被拒, 脚本已就绪待提权执行）
 - 预警评估由 **Java 侧** `@Scheduled`（每日 21:30）执行, 与 Python 调度分工；结果统一写 `collect_log`
 
-**Java 侧（W2）**：JDK **17**（`C:\Program Files\Java\jdk-17`；PATH 默认是 JDK23，须显式 `JAVA_HOME`）；Maven 3.9.16 便携安装于 `D:\Program\tools\apache-maven-3.9.16`；后端端口 **8081**（本机 8080 常被其他软件占用，可用 `APR_SERVER_PORT` 覆盖）；数据库密码经 `APR_MYSQL_PWD` 注入；JWT 密钥经 `APR_JWT_SECRET` 覆盖（生产必须改）。
+**Java 侧（W2）**：JDK **17**（`C:\Program Files\Java\jdk-17`；PATH 默认是 JDK23，须显式 `JAVA_HOME`）；Maven 3.9.16 便携安装于 `D:\Program\tools\apache-maven-3.9.16`；后端端口 **8081**（本机 8080 常被其他软件占用，可用 `APR_SERVER_PORT` 覆盖）；数据库密码经 `APR_MYSQL_PWD` 注入；JWT 密钥经 `APR_JWT_SECRET` 注入（至少 32 字节，无默认值）。
 
 **前端（W3）**：`cd frontend && npm run dev`（5173, 已配 CORS 允许本机来源）；后端地址经 `VITE_API_BASE` 覆盖（默认 http://localhost:8081）。
 
@@ -242,7 +266,7 @@ agri-price-radar/
 | — | 前端设计系统（令牌/EP主题/组件/规范页/单位治理） | ✅ 2026-09-24（v0.3.0） |
 | **W1** | **采集服务化：DDL v2 迁移 + 增量采集 + APScheduler 定时 + MySQL 切换 + predict_result 预计算 + collect_log** | ✅ 2026-09-24（本地完成，待推送） |
 | W2 | SpringBoot 后端：§6 接口 + JWT/RBAC + Redis | ✅ W2.1+W2.2 完成（鉴权/预警/触发/告警测试） |
-| W3 | Vue3 管理端（品类管理/趋势/预测/任务日志页） | ▶ 登录、看板、采集监控、预警配置、首次改密已交付；品类管理与操作审计待补 |
+| W3 | Vue3 管理端（品类管理/趋势/预测/任务日志页） | ✅ R1 / v0.7.0：登录、看板、采集监控、预警配置、首次改密、只读品类管理与操作审计全部完成 |
 | W4 | 算法升级：Prophet 对比、MAPE 准入、FastAPI /ml 通道 | 待启动 |
 | W5 | Dify 智能问答 + 1920×1080 可视化大屏（canvas-night） | 待启动 |
 
@@ -290,6 +314,8 @@ agri-price-radar/
 - [x] W2.2：Python 冒烟测试 11 例全绿
 - [x] W2.2：生产 profile 关闭 SQL 打印
 - [x] W3：首次登录强制改密（sys_user 标记 + 服务端拦截 + 改密接口与页面；后端 32 例全绿）
-- [ ] W3：品类管理、操作审计（op_log）
+- [x] W3：只读品类管理（方案 B）、操作审计（op_log，四动作 + ADMIN 查询；40 例测试通过）
 - [ ] W4：Prophet 对比、MAPE 准入阈值、FastAPI /ml 实时通道
 - [ ] W5：Dify 智能问答 + 1920×1080 可视化大屏
+
+R1 验收与决策归档见 [docs/DEVLOG.md](docs/DEVLOG.md)。下一轮 R2 对应 W4：Prophet 对比与 MAPE 30% 准入。

@@ -64,7 +64,7 @@ async function onSubmit() {
           <AppButton type="button" variant="primary" :disabled="loading" @click="onSubmit">
             {{ loading ? '登录中…' : '登录' }}
           </AppButton>
-          <p class="t-micro hint">开发环境预置账号：admin / admin123（超级管理员）</p>
+          <p class="t-micro hint">请使用管理员分配的账号登录</p>
         </form>
       </AppCard>
 

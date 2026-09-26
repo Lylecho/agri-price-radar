@@ -6,5 +6,5 @@ ALTER TABLE sys_user
 -- 仅标记仍使用预置密码摘要的开发账号，已自行改密的账号不受影响。
 UPDATE sys_user
 SET must_change_pwd = 1
-WHERE (username = 'admin' AND password = '$2b$10$PLVH3Wo0A6SMC9l5Ap/CNeBxdnXbOuKs4XEHT6PV1pbV5j.8guUgy')
-   OR (username = 'dataadmin' AND password = '$2b$10$Jj9gm40vahxNSAerDBnDYuKsoqyLTx0LTMrRU5j13wXiW4yNDG0IG');
+WHERE (username = 'admin' AND password = @apr_admin_password_hash)
+   OR (username = 'dataadmin' AND password = @apr_data_admin_password_hash);

@@ -1,5 +1,8 @@
 package com.agri.priceradar.service;
 
+import com.agri.priceradar.aspect.Audited;
+import com.agri.priceradar.aspect.AuditAction;
+
 import com.agri.priceradar.common.BizException;
 import com.agri.priceradar.common.CategoryCatalog;
 import com.agri.priceradar.common.ResultCode;
@@ -54,6 +57,7 @@ public class AlertService {
     }
 
     /** 更新阈值/启用状态（管理端, 仅 ADMIN 可调用） */
+    @Audited(AuditAction.UPDATE_ALERT_RULE)
     public AlertRule updateRule(Long id, AlertRuleUpdateRequest request) {
         AlertRule rule = ruleMapper.selectById(id);
         if (rule == null) {

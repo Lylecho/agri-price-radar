@@ -4,6 +4,7 @@
 凭据来自 python/.env（与采集/预计算同源）, 不在命令行暴露密码。
 """
 import sys
+import os
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -47,6 +48,10 @@ def main() -> int:
     print(f"目标: {MYSQL_CONFIG['user']}@{MYSQL_CONFIG['host']}:{MYSQL_CONFIG['port']}"
           f"/{MYSQL_CONFIG['database']}")
     conn = get_connection()
+    # 会话变量通过参数绑定注入；不在 SQL、源码或输出中保存密码摘要。
+    with cursor(conn) as cur:
+        cur.execute("SET @apr_admin_password_hash = %s, @apr_data_admin_password_hash = %s",
+                    (os.environ.get("APR_ADMIN_PASSWORD_HASH"), os.environ.get("APR_DATA_ADMIN_PASSWORD_HASH")))
     for arg in sys.argv[1:]:
         p = Path(arg)
         if not p.is_absolute():

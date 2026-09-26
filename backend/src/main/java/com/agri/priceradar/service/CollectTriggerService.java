@@ -1,5 +1,8 @@
 package com.agri.priceradar.service;
 
+import com.agri.priceradar.aspect.Audited;
+import com.agri.priceradar.aspect.AuditAction;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -59,6 +62,7 @@ public class CollectTriggerService {
     }
 
     /** 触发一次增量采集; 已在运行则返回 false */
+    @Audited(AuditAction.TRIGGER_COLLECT)
     public boolean trigger() {
         if (!running.compareAndSet(false, true)) {
             return false;

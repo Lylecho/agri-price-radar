@@ -36,7 +36,9 @@ public interface PriceDailyMapper extends BaseMapper<PriceDaily> {
     PriceDaily selectLatest(@Param("prodName") String prodName, @Param("unit") String unit);
 
     /** 数据量与时间跨度统计 */
-    @Select("SELECT COUNT(*) AS cnt, MIN(pub_date) AS minDate, MAX(pub_date) AS maxDate " +
+    @Select("SELECT COUNT(*) AS cnt, MIN(pub_date) AS minDate, MAX(pub_date) AS maxDate, " +
+            "COALESCE(SUM(CASE WHEN unit_info <> '斤' THEN 1 ELSE 0 END), 0) AS nonStandardUnitCount, " +
+            "COALESCE(SUM(CASE WHEN prod_name = '散鸡蛋' AND unit_info = '斤' AND avg_price > 15 THEN 1 ELSE 0 END), 0) AS suspectPriceCount " +
             "FROM price_daily WHERE prod_name = #{prodName}")
     CategoryStatsVO selectStats(@Param("prodName") String prodName);
 }

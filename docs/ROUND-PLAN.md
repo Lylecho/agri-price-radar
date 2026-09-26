@@ -85,7 +85,7 @@
 | A2 JWT 工具与过滤器 | `security/JwtUtil`、`JwtAuthFilter`、`UserContext` | 单测：签发/校验/过期 |
 | A3 登录接口 | `POST /api/auth/login` → token + 角色；`AuthController/AuthService` | 正确账号 200 带 token；错误密码 401 |
 | A4 接口鉴权规则 | `/api/price/**`、`/api/predict/**` 需登录；`/api/admin/**` 需 DATA_ADMIN/ADMIN | 无 token 401；dataadmin 访问 admin 接口 200；越权 403 |
-| A5 密码校验 | `BCryptPasswordEncoder` 对接已种账号；首次登录强制改密标记 | 用 admin/admin123 登录成功 |
+| A5 密码校验 | `BCryptPasswordEncoder` 对接已种账号；首次登录强制改密标记 | 用 环境变量指定的开发凭据 登录成功 |
 | A6 鉴权测试 | `AuthApiIntegrationTest` | 覆盖 登录成功/失败/无 token/越权 4 类 |
 
 > 说明：不引入 Redis 存 token（本机未装），采用无状态 JWT + 黑名单可选（本轮不做登出黑名单）。
@@ -189,7 +189,7 @@
 ### 6.1 后端与安全
 
 - [ ] `mvn -s maven-settings.xml test` 全绿（原 11 例 + 新增鉴权/预警测试 ≥ 6 例）
-- [ ] `POST /api/auth/login`：`admin/admin123` → 200 且返回 token 与角色
+- [ ] `POST /api/auth/login`：环境变量指定的开发凭据 → 200 且返回 token 与角色
 - [ ] 错误密码 → 401；不存在用户 → 401（不泄露账号是否存在）
 - [ ] 无 token 访问 `/api/price/categories` → 401
 - [ ] `dataadmin` 访问 `/api/admin/collect/logs` → 200

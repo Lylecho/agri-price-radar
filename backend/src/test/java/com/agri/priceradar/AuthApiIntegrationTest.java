@@ -3,6 +3,7 @@ package com.agri.priceradar;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import java.util.Map;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -20,8 +21,9 @@ class AuthApiIntegrationTest extends ApiTestBase {
     @Test
     @DisplayName("admin 正确凭据登录应返回 token 与角色")
     void loginShouldReturnToken() throws Exception {
+        jdbcTemplate.update("UPDATE sys_user SET must_change_pwd = 1 WHERE username = ?", testAdmin);
         mockMvc.perform(post(LOGIN).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"admin\",\"password\":\"admin123\"}"))
+                        .content(objectMapper.writeValueAsString(Map.of("username", testAdmin, "password", testPassword))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.token").isNotEmpty())
@@ -33,8 +35,9 @@ class AuthApiIntegrationTest extends ApiTestBase {
     @Test
     @DisplayName("dataadmin 登录应返回 DATA_ADMIN 角色")
     void dataAdminLoginShouldReturnDataAdminRole() throws Exception {
+        jdbcTemplate.update("UPDATE sys_user SET must_change_pwd = 1 WHERE username = ?", testDataAdmin);
         mockMvc.perform(post(LOGIN).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"dataadmin\",\"password\":\"dataadmin123\"}"))
+                        .content(objectMapper.writeValueAsString(Map.of("username", testDataAdmin, "password", testPassword))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.role").value("DATA_ADMIN"))
@@ -130,12 +133,12 @@ class AuthApiIntegrationTest extends ApiTestBase {
         mockMvc.perform(post("/api/auth/change-password")
                         .header("Authorization", bearer(token))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"oldPassword\":\"admin123\",\"newPassword\":\"new-password-123\"}"))
+                        .content(objectMapper.writeValueAsString(Map.of("oldPassword", testPassword, "newPassword", newPassword))))
                 .andExpect(jsonPath("$.code").value(200));
         mockMvc.perform(get("/api/price/categories").header("Authorization", bearer(token)))
                 .andExpect(jsonPath("$.code").value(200));
-        org.junit.jupiter.api.Assertions.assertNull(login(testAdmin, "admin123"));
-        org.junit.jupiter.api.Assertions.assertNotNull(login(testAdmin, "new-password-123"));
+        org.junit.jupiter.api.Assertions.assertNull(login(testAdmin, testPassword));
+        org.junit.jupiter.api.Assertions.assertNotNull(login(testAdmin, newPassword));
     }
 
     @Test
@@ -146,12 +149,12 @@ class AuthApiIntegrationTest extends ApiTestBase {
         mockMvc.perform(post("/api/auth/change-password")
                         .header("Authorization", bearer(token))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"oldPassword\":\"wrong-pass\",\"newPassword\":\"new-password-123\"}"))
+                        .content(objectMapper.writeValueAsString(Map.of("oldPassword", java.util.UUID.randomUUID().toString(), "newPassword", newPassword))))
                 .andExpect(jsonPath("$.code").value(400));
         mockMvc.perform(post("/api/auth/change-password")
                         .header("Authorization", bearer(token))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"oldPassword\":\"admin123\",\"newPassword\":\"admin123\"}"))
+                        .content(objectMapper.writeValueAsString(Map.of("oldPassword", testPassword, "newPassword", testPassword))))
                 .andExpect(jsonPath("$.code").value(400));
         mockMvc.perform(get("/api/price/categories").header("Authorization", bearer(token)))
                 .andExpect(jsonPath("$.code").value(403));

@@ -20,6 +20,16 @@ const routes = [
     redirect: '/dashboard',
     children: [
       {
+        path: 'categories',
+        component: () => import('@/views/CategoryManage.vue'),
+        meta: { title: '品类管理 · 菜价雷达' },
+      },
+      {
+        path: 'oplog',
+        component: () => import('@/views/OpLogAudit.vue'),
+        meta: { title: '操作审计 · 菜价雷达', admin: true },
+      },
+      {
         path: 'dashboard',
         name: 'dashboard',
         component: () => import('@/views/Dashboard.vue'),
@@ -73,6 +83,7 @@ router.beforeEach(async (to) => {
   if (to.path === '/login' && userStore.isLoggedIn) {
     return { path: '/dashboard' }
   }
+  if (to.meta.admin && !userStore.isAdmin) return { path: '/dashboard' }
   return true
 })
 
