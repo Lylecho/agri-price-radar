@@ -5,5 +5,5 @@ import request from './request'
  * 注意: 展示时必须附带 disclaimer（蓝图铁律）
  */
 export function fetchPredict(category) {
-  return request.get('/api/predict/latest', { params: { category } })
+  return request.get('/api/predict/latest', { params: { category }, emptyPredictionOn404: true })
 }

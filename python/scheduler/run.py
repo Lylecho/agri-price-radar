@@ -4,7 +4,7 @@ APScheduler 调度进程（W1 采集服务化）
 =====================================
 计划(Asia/Shanghai, 用户已确认):
   - 增量采集 collect : 每日 08:00 / 14:00 / 20:00, 回看最近3天(upsert 幂等)
-  - 预测预计算 precompute : 每日 21:00, 五品类 ARIMA × 未来7天 → predict_result
+  - 预测预计算 precompute : 每日 21:00, 五品类 ARIMA/Prophet 择优与30%准入 × 未来7天 → predict_result
 每次运行写 collect_log(SUCCESS/FAILED + 摘要)。
 
 用法:
@@ -76,7 +76,7 @@ def job_collect():
 
 
 def job_precompute():
-    run_with_log("precompute", core_precompute)
+    run_with_log("precompute", lambda: core_precompute(record_log=False))
 
 
 def main() -> int:

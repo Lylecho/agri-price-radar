@@ -209,7 +209,9 @@ CREATE TABLE alert_record (            -- 预警触发记录(同品类+指标+�
 - **双通道**（铁律）：日常展示读 `predict_result` 预计算表；实时预测走 SpringBoot → FastAPI `/ml`；FastAPI 不可用时主流程照常。
 - W1：ARIMA（阶数网格 (1-3,1,1-2) 按 AIC 选优；近两年日度均价、主导单位过滤、缺测日线性插值；前80%/后20%切分，测试集 MAPE 随行）。
 - W2.2 预警判定：`|日环比涨跌幅| ≥ 阈值`（按品类, 默认 5%），与 `/api/price/change` 同口径；每日 21:30 由 Java 侧定时任务评估，记录表唯一键保证重跑幂等。
-- W4：Prophet / 特征模型（节假日、季节项）对比实验，按品类择优；MAPE 准入阈值（展示门槛）待 W4 定。
+- W4/R2 离线部分已完成：ARIMA 在训练集按 AIC 选阶，与 Prophet 在同一后20%测试段按 MAPE 择优；默认 **MAPE ≤ 30%** 才发布预测。映射与斤价过滤保持一致，近730天窗口锚定入库数据截止日，缺测线性插值不跨切分边界污染训练段。
+- 2026-09-27 固定快照择优：大白菜 ARIMA(2,1,1) 22.149%、黄瓜 Prophet 24.869%、西红柿 ARIMA(2,1,2) 39.356%（暂停展示）、猪肉 ARIMA(1,1,1) 5.299%、鸡蛋 Prophet 8.211%。完整对照、耗时与局限见 [W4-MODEL-REPORT](docs/W4-MODEL-REPORT.md)。
+- 准入失败不写 `predict_result`，同时撤下该品类旧派生预测并写 `collect_log` 摘要；准入成功使用既有 uk_pred + 参数化批量 upsert，原子更新当前模型未来7天窗口。本次四品类共28条。前端空预测显示“波动过大，暂不提供预测（仅供参考）”，网络错误单独提示；后端接口保持原有契约。
 - 所有预测输出必须携带：模型标识、测试集 MAPE、「预测结果仅供参考，不构成任何买卖建议」。
 
 ## 8. Dify 方案（W5）
@@ -267,7 +269,7 @@ agri-price-radar/
 | **W1** | **采集服务化：DDL v2 迁移 + 增量采集 + APScheduler 定时 + MySQL 切换 + predict_result 预计算 + collect_log** | ✅ 2026-09-24（本地完成，待推送） |
 | W2 | SpringBoot 后端：§6 接口 + JWT/RBAC + Redis | ✅ W2.1+W2.2 完成（鉴权/预警/触发/告警测试） |
 | W3 | Vue3 管理端（品类管理/趋势/预测/任务日志页） | ✅ R1 / v0.7.0：登录、看板、采集监控、预警配置、首次改密、只读品类管理与操作审计全部完成 |
-| W4 | 算法升级：Prophet 对比、MAPE 准入、FastAPI /ml 通道 | 待启动 |
+| W4 | 算法升级：Prophet 对比、MAPE 准入、FastAPI /ml 通道 | ▶ R2 / v0.8.0 离线对比与30%准入完成；FastAPI /ml 待办 |
 | W5 | Dify 智能问答 + 1920×1080 可视化大屏（canvas-night） | 待启动 |
 
 ## 13. 风险与对策（踩坑台账）
@@ -315,7 +317,8 @@ agri-price-radar/
 - [x] W2.2：生产 profile 关闭 SQL 打印
 - [x] W3：首次登录强制改密（sys_user 标记 + 服务端拦截 + 改密接口与页面；后端 32 例全绿）
 - [x] W3：只读品类管理（方案 B）、操作审计（op_log，四动作 + ADMIN 查询；40 例测试通过）
-- [ ] W4：Prophet 对比、MAPE 准入阈值、FastAPI /ml 实时通道
+- [x] W4/R2：Prophet/ARIMA 五品类对比、MAPE 30%准入、幂等预计算与前端空预测兜底（Python21例通过）
+- [ ] W4：FastAPI /ml 实时通道
 - [ ] W5：Dify 智能问答 + 1920×1080 可视化大屏
 
-R1 验收与决策归档见 [docs/DEVLOG.md](docs/DEVLOG.md)。下一轮 R2 对应 W4：Prophet 对比与 MAPE 30% 准入。
+R1/R2 验收与决策归档见 [docs/DEVLOG.md](docs/DEVLOG.md)。W4 后续为 FastAPI 实时通道，日常展示继续读取预计算表。

@@ -54,3 +54,43 @@
 - W3 无阻断项，满足关闭条件。构建体积提示作为后续优化记录，不在本轮扩大范围。
 - 新环境需注入数据库/JWT 凭据和初始化密码摘要；历史迁移仅执行一次，已有环境按 backend/README 追加审计表即可。
 - R2 对应 W4：基于固定入库快照做 Prophet 与 ARIMA 对比，并落实 MAPE 准入阈值 30%；预测展示继续保留“预测结果仅供参考”。FastAPI 实时通道随后按蓝图推进。
+
+## R2 · W4 算法升级：Prophet 对比与 MAPE 准入（离线部分）
+
+### 轮次编号
+
+- R2，2026-09-27；标签 `v0.8.0`，分支 `main`；承接已关闭的 W3，仅交付 W4 离线模块。
+
+### 开发目标
+
+按蓝图 §7 完成五品类 ARIMA/Prophet 同口径对比，30% MAPE 展示准入、幂等预计算、空预测文案与论文可引用报告。不修改 Java/后端接口，不实施实时预测通道。
+
+### 改动文件
+
+- 新增 `python/ml/{arima_model,prophet_model,model_common,compare_models}.py`；重构 `precompute.py`，修改 constants.py、requirements.txt、tests/test_smoke.py、scheduler/run.py（避免双重任务日志）。
+- 修改 `frontend/src/views/Dashboard.vue`、`components/charts/PredictChart.vue`；api/predict.js 与 api/request.js 仅增加预测404空状态适配，兼容既有接口。
+- 新增 `docs/W4-MODEL-REPORT.md`、`docs/experiments/r2/{snapshot.csv,comparison.json,comparison.md}`、`docs/screenshots/r2-{rejected,prophet}.png`；更新 README §7/§12/§14 与本日志。
+
+### 改动说明（阈值与择优结论）
+
+1. **锁定阈值 30%（含边界）**，先比较未四舍五入测试 MAPE 择优，再判断准入。ARIMA 内部在训练集按 AIC 选阶，不将跨模型 AIC 直接比较。平局优先 ARIMA；非有限误差或非法未来价格不参选。
+2. **择优结果**：大白菜 ARIMA(2,1,1)，22.149%；黄瓜 Prophet，24.869%；西红柿 ARIMA(2,1,2)，39.356%（拒绝展示）；猪肉 ARIMA(1,1,1)，5.299%；鸡蛋 Prophet，8.211%。共4品类、28条未来7天预测。两模型完整数值与耗时见报告，不沿用旧快照的误差值。
+3. 固定2024-09-28至2026-09-27的730日窗口，主导斤价过滤、日度均价、584/146日顺序切分、线性插值；训练段插值不读取测试值。比较和预计算共用实现，导出带SHA-256的日均快照与实验JSON。Prophet 1.4.0官方Windows wheel安装成功，无SARIMAX替代。
+4. 无DDL变更。保留uk_pred与参数化executemany upsert；准入成功撤下旧模型/旧窗口，超阈值不写入且撤下该品类旧派生预测，防止接口返回历史高误差曲线。全部模型计算完成再以单事务发布，失败回滚。collect_log记录阈值、择优、跳过原因，直接入口与调度入口各只记一次。
+5. 前端按既有code=404处理空预测，显示“波动过大，暂不提供预测（仅供参考）”；网络错误保持独立提示。预测图例改为实际模型名称，保留免责声明，并防止快速切换品类的迟到请求覆盖当前结果。空契约无法区分尚未预计算与门禁拒绝，部署需先完成预计算，限制已写报告。
+6. 测试输入与验收账号使用临时生成的凭据，经环境/本地忽略文件注入，不写入源码、示例或报告。
+
+### 验证结果
+
+- Python冒烟 **21/21**（原11+新增10）：门禁边界/NaN/非法阈值、MAPE与零分母、择优/平局、非法预测、切分边界插值、数据不足、幂等、降阈值恢复、模型切换、事务回滚。
+- compare_models固定快照复跑：SHA-256、两模型MAPE（误差<1e-8）及择优完全一致。
+- 真库阈值0：0条预测，collect_log SUCCESS/rows_written=0并有五品类跳过摘要；恢复30%：28条，西红柿0条。再次正常重跑：主键、模型、MAPE、日期、预测值与步长完全一致，无重复。
+- 原后端接口验证：4品类各code=200、7点，model/mape_test与实验一致；西红柿code=404。无Java文件修改。
+- 前端生产构建0 error；保留既有chunk体积提示。浏览器核验西红柿兜底文案及黄瓜Prophet 24.869%预测曲线，无控制台错误/警告。临时账号验收结束后清理。
+- 证据：[拒绝展示](screenshots/r2-rejected.png)、[Prophet曲线](screenshots/r2-prophet.png)、[完整报告](W4-MODEL-REPORT.md)。
+
+### 遗留问题与下一步
+
+- R2离线目标完成，W4整体仍有FastAPI `/ml`实时通道待办。
+- Prophet年周期训练不足两个完整周期存在识别限制；测试段用于选模、含少量插值日，146天一次性外推MAPE不等同7天滚动误差。保留失败对照，不夸大泛化结论；后续独立评估可采用滚动起点和额外保留段。
+- 日常调度应在升级后重新启动加载新实现；本轮验收时未发现常驻调度进程，未擅自创建新的自启动配置。

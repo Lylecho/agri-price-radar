@@ -38,8 +38,8 @@ function buildOption() {
 
   return {
     tooltip: { trigger: 'axis' },
-    legend: { top: 4, textStyle: { color: '#707070' } },
-    grid: { left: 56, right: 24, top: 56, bottom: 56 },
+    legend: { top: 4, right: 8, textStyle: { color: '#707070' } },
+    grid: { left: 56, right: 24, top: 82, bottom: 56 },
     title: {
       text: '未来7天预测',
       subtext: sub,
@@ -71,7 +71,7 @@ function buildOption() {
         data: [...props.history.map((d) => d[1]), ...new Array(predDates.length).fill(null)],
       },
       {
-        name: '预测(ARIMA)',
+        name: props.model ? `预测(${props.model})` : '预测',
         type: 'line',
         showSymbol: true,
         symbolSize: 6,
@@ -84,19 +84,23 @@ function buildOption() {
 }
 
 function render() {
-  if (!chart) return
+  if (!props.predict.length || !el.value) {
+    if (chart) chart.dispose()
+    chart = null
+    return
+  }
+  if (!chart) chart = echarts.init(el.value)
   chart.setOption(buildOption(), true)
 }
 
 const onResize = () => chart && chart.resize()
 
 onMounted(() => {
-  chart = echarts.init(el.value)
   render()
   window.addEventListener('resize', onResize)
 })
 
-watch(() => [props.history, props.predict, props.model, props.mape], render, { deep: true })
+watch(() => [props.history, props.predict, props.model, props.mape], render, { deep: true, flush: 'post' })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
@@ -105,7 +109,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="el" class="chart" :style="{ height }"></div>
+  <div v-if="predict.length" ref="el" class="chart" :style="{ height }"></div>
+  <el-empty v-else description="波动过大，暂不提供预测（仅供参考）" />
 </template>
 
 <style scoped>

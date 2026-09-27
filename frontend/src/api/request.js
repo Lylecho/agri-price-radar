@@ -43,6 +43,8 @@ request.interceptors.response.use(
     if (body.code === 200) {
       return body.data
     }
+    // 预测准入拒绝沿用后端404契约；空预测是正常展示状态，不弹错误提示。
+    if (body.code === 404 && response.config.emptyPredictionOn404) return null
     if (body.code === 401) {
       ElMessage.error(body.msg || '未登录或登录已过期')
       redirectToLogin()

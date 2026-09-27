@@ -109,5 +109,114 @@ class TestAlertThreshold(unittest.TestCase):
         self.assertTrue(self.triggered(5.0, 5.0))
 
 
+
+class TestModelAdmission(unittest.TestCase):
+    """算法判定与真实内存数据库写入回归，不训练、不联网。"""
+
+    def test_门禁边界和非有限值(self):
+        from ml.model_common import admitted
+        self.assertTrue(admitted(30))
+        self.assertFalse(admitted(30.0001))
+        self.assertTrue(admitted(0, 0))
+        for value in (float("nan"), float("inf"), -1):
+            self.assertFalse(admitted(value))
+        for threshold in (-1, float("nan"), float("inf")):
+            with self.assertRaises(ValueError):
+                admitted(10, threshold)
+
+    def test_按MAPE择优而非跨模型AIC(self):
+        import numpy as np
+        from ml.model_common import ForecastResult, choose_best
+        a = ForecastResult("ARIMA(1,1,1)", 35, np.ones(7), 1, -100)
+        p = ForecastResult("Prophet", 20, np.ones(7), 1)
+        self.assertIs(choose_best([a, p]), p)
+        p.mape = 35
+        self.assertIs(choose_best([p, a]), a)
+
+    def test_无效预测不能胜出(self):
+        import numpy as np
+        from ml.model_common import ForecastResult, choose_best
+        invalid = ForecastResult("Prophet", 1, np.array([-1]), 1)
+        with self.assertRaises(ValueError):
+            choose_best([invalid])
+
+    def test_MAPE百分数与零分母保护(self):
+        from ml.model_common import mape_percent
+        self.assertAlmostEqual(mape_percent([10, 20], [11, 18]), 10)
+        with self.assertRaises(ValueError):
+            mape_percent([0], [1])
+
+    def test_训练段插值不读取测试值(self):
+        import numpy as np
+        import pandas as pd
+        from ml.model_common import prepare_series
+        days = pd.date_range("2024-01-01", periods=150)
+        series = pd.Series(np.ones(150), index=days).drop(days[119])
+        series.iloc[119:] = 100
+        full, train, test = prepare_series(series)
+        self.assertEqual((len(train), len(test)), (120, 30))
+        self.assertEqual(train.iloc[-1], 1)
+        self.assertEqual(test.iloc[0], 100)
+
+    def test_窗口内观测不足拒绝(self):
+        import pandas as pd
+        from ml.model_common import prepare_series
+        with self.assertRaises(ValueError):
+            prepare_series(pd.Series([1]*119, index=pd.date_range("2024-01-01", periods=119)))
+
+    def setUp(self):
+        import sqlite3
+        from config.db import DDL_SQLITE
+        from unittest.mock import patch
+        from config.db import UPSERT_PREDICT_SQLITE
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.executescript(DDL_SQLITE)
+        self.backend = patch("ml.precompute.DB_BACKEND", "sqlite")
+        self.sql = patch("ml.precompute.get_upsert_sql", return_value=UPSERT_PREDICT_SQLITE)
+        self.backend.start()
+        self.sql.start()
+        self.result = {"category": "黄瓜", "prod_name": "黄瓜", "end": "2026-09-27",
+                       "winner": "Prophet", "mape": 20.0, "forecast": [2.0]*7}
+
+    def tearDown(self):
+        self.backend.stop()
+        self.sql.stop()
+        self.conn.close()
+
+    def test_重跑保留主键且不重复(self):
+        from ml.precompute import publish_results
+        publish_results(self.conn, [self.result])
+        first = self.conn.execute("SELECT id,model,mape_test FROM predict_result ORDER BY id").fetchall()
+        publish_results(self.conn, [self.result])
+        self.assertEqual(first, self.conn.execute("SELECT id,model,mape_test FROM predict_result ORDER BY id").fetchall())
+        self.assertEqual(len(first), 7)
+
+    def test_降阈值清旧预测并恢复(self):
+        from ml.precompute import publish_results
+        publish_results(self.conn, [self.result])
+        summary = publish_results(self.conn, [self.result], threshold=0)
+        self.assertEqual(summary["rows_written"], 0)
+        self.assertIn("跳过写入", summary["detail"])
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM predict_result").fetchone()[0], 0)
+        publish_results(self.conn, [self.result])
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM predict_result").fetchone()[0], 7)
+
+    def test_换模型移除旧模型(self):
+        from ml.precompute import publish_results
+        publish_results(self.conn, [self.result])
+        self.result["winner"] = "ARIMA(1,1,1)"
+        publish_results(self.conn, [self.result])
+        self.assertEqual(self.conn.execute("SELECT DISTINCT model FROM predict_result").fetchall(), [("ARIMA(1,1,1)",)])
+
+    def test_写入失败整批回滚(self):
+        from ml.precompute import publish_results
+        publish_results(self.conn, [self.result])
+        before = self.conn.execute("SELECT * FROM predict_result").fetchall()
+        self.result["winner"] = "ARIMA(1,1,1)"
+        self.result["forecast"] = [None]
+        with self.assertRaises(TypeError):
+            publish_results(self.conn, [self.result])
+        self.assertEqual(before, self.conn.execute("SELECT * FROM predict_result").fetchall())
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

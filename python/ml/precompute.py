@@ -1,119 +1,88 @@
 # -*- coding: utf-8 -*-
+"""W4离线择优预计算。--snapshot 固定快照，--threshold 默认30；不采集、不改接口。
+低阈值验证会撤下旧预测；验证后以默认阈值重跑恢复。
 """
-预测预计算（W1）：五品类 ARIMA × 未来7天 → predict_result 表
-=============================================================
-铁律（蓝图 §7 双通道）:
-  - 只读已入库快照(price_daily), 不现场爬取;
-  - 日常展示只读 predict_result 预计算表, 本任务由调度器每日夜间触发(21:00);
-  - 所有输出携带模型标识 + 测试集MAPE; 前端展示必须附「预测结果仅供参考」。
-
-运行: python python/ml/precompute.py     (或经 scheduler/run.py 定时触发)
-"""
-import sys
-import warnings
-from datetime import timedelta
+import argparse
+from datetime import datetime
 from pathlib import Path
-
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # 引入 python/config
-
-import numpy as np                                              # noqa: E402
-import pandas as pd                                             # noqa: E402
-from config.db import (get_connection, get_upsert_sql, cursor,  # noqa: E402
-                       DB_BACKEND, placeholder)
-from config.constants import REPRESENTATIVES                    # noqa: E402
-
-warnings.filterwarnings("ignore")     # ARIMA 收敛告警等噪音
-
-HORIZON = 7                          # 预测天数
-LOOKBACK_DAYS = 730                  # 训练窗口: 近两年日度均价
-MIN_POINTS = 120                     # 最少观测数(不足则跳过该品类)
-ARIMA_GRID = [(1, 1, 1), (2, 1, 1), (1, 1, 2), (2, 1, 2), (3, 1, 2)]
+import sys
+from zoneinfo import ZoneInfo
+import pandas as pd
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from config.constants import MAPE_THRESHOLD
+from config.db import get_connection, get_upsert_sql, get_insert_log_sql, cursor, DB_BACKEND
+from ml.model_common import HORIZON, admitted
+from ml.compare_models import load_snapshot, compare_snapshot
 
 
-def load_daily_avg(conn, name: str):
-    """代表品名 → 日度均价序列(单位治理: 仅取该品名主导单位的行)"""
-    ph = placeholder()
-    with cursor(conn) as cur:
-        cur.execute(f"SELECT pub_date, avg_price, unit_info FROM price_daily "
-                    f"WHERE prod_name = {ph} AND avg_price IS NOT NULL", (name,))
-        df = pd.DataFrame(cur.fetchall(), columns=["pub_date", "avg_price", "unit_info"])
-    if df.empty:
-        return None
-    df["pub_date"] = pd.to_datetime(df["pub_date"])
-    # 跨后端兼容: MySQL DECIMAL 经 pymysql 返回 Decimal(object dtype), 必须显式转数值
-    df["avg_price"] = pd.to_numeric(df["avg_price"], errors="coerce")
-    df = df[df["avg_price"].notna()]
-    units = df["unit_info"].dropna()
-    if len(units):
-        dom = str(units.mode().iat[0])
-        df = df[(df["unit_info"] == dom) | (df["unit_info"].isna())]
-    return df.groupby("pub_date")["avg_price"].mean().sort_index()
-
-
-def arima_forecast(s: pd.Series, horizon: int = HORIZON):
-    """连续日序列 → 前80%/后20%切分, 网格按AIC选一个ARIMA, 返回(阶数, 测试MAPE, 未来预测)"""
-    from statsmodels.tsa.arima.model import ARIMA
-    idx = pd.date_range(s.index[0], s.index[-1], freq="D")
-    y = s.reindex(idx).interpolate(limit_direction="both")      # 少量缺测日线性插值
-    n = len(y)
-    n_tr = int(n * 0.8)
-    train, test = y.iloc[:n_tr].to_numpy(), y.iloc[n_tr:].to_numpy()
-
-    best_order, best_aic, best_fit = None, np.inf, None
-    for order in ARIMA_GRID:
-        try:
-            m = ARIMA(train, order=order).fit()
-            if m.aic < best_aic:
-                best_order, best_aic, best_fit = order, m.aic, m
-        except Exception as exc:
-            print(f"  ARIMA{order} 拟合失败: {exc}")
-    if best_fit is None:
-        raise RuntimeError("所有候选 ARIMA 阶数均拟合失败")
-
-    pred_test = np.asarray(best_fit.forecast(steps=len(test)))
-    mape = float(np.mean(np.abs((test - pred_test) / test)) * 100)
-
-    final = ARIMA(y.to_numpy(), order=best_order).fit()          # 全量重估同一阶数
-    fc = np.asarray(final.forecast(steps=horizon))
-    return best_order, mape, fc
-
-
-def precompute_all(horizon: int = HORIZON) -> dict:
-    """对五个品类跑 ARIMA 并 upsert 进 predict_result; 返回摘要(供 collect_log)"""
-    conn = get_connection()
-    upsert_sql = get_upsert_sql("predict")
-    cutoff_note = pd.Timestamp.now().normalize() - pd.Timedelta(days=LOOKBACK_DAYS)
-    lines, rows_written = [], 0
-
-    for cat, name in REPRESENTATIVES:
-        s_full = load_daily_avg(conn, name)
-        if s_full is None or len(s_full) < MIN_POINTS:
-            lines.append(f"{cat}({name}): 数据不足({0 if s_full is None else len(s_full)} 点 < {MIN_POINTS}), 跳过")
-            continue
-        s = s_full[s_full.index >= cutoff_note]
-        order, mape, fc = arima_forecast(s, horizon)
-        model = f"ARIMA({order[0]},{order[1]},{order[2]})"
-        last_date = s.index[-1]
+def publish_results(conn, results, threshold=MAPE_THRESHOLD):
+    """整批原子发布；撤下旧派生结果防止门禁拒绝后接口继续展示旧模型。
+    既有 uk_pred/upsert 不变，同一快照重跑行内容幂等。
+    """
+    admitted(0, threshold)
+    delete_sql = ("DELETE FROM predict_result WHERE category = %s" if DB_BACKEND == "mysql"
+                  else "DELETE FROM predict_result WHERE category = ?")
+    retire_sql = ("DELETE FROM predict_result WHERE category = %s AND (model <> %s OR predict_date < %s OR predict_date > %s)"
+                  if DB_BACKEND == "mysql" else
+                  "DELETE FROM predict_result WHERE category = ? AND (model <> ? OR predict_date < ? OR predict_date > ?)")
+    lines, count = [], 0
+    try:
         with cursor(conn) as cur:
-            for i, v in enumerate(fc, start=1):
-                cur.execute(upsert_sql, (
-                    cat, name, (last_date + timedelta(days=i)).strftime("%Y-%m-%d"),
-                    round(float(v), 3), model, round(mape, 3), i,
-                ))
-                rows_written += 1
+            for result in results:
+                category = result["category"]
+                if not admitted(result["mape"], threshold):
+                    cur.execute(delete_sql, (category,))
+                    lines.append(f"{category}: {result['winner']} MAPE={result['mape']:.3f}% 超过{threshold:g}%，跳过写入并撤下旧预测")
+                    continue
+                end = pd.Timestamp(result["end"])
+                cur.execute(retire_sql, (category, result["winner"],
+                            (end + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
+                            (end + pd.Timedelta(days=HORIZON)).strftime("%Y-%m-%d")))
+                rows = [(category, result["prod_name"], (end + pd.Timedelta(days=i)).strftime("%Y-%m-%d"),
+                         round(float(value), 3), result["winner"], round(result["mape"], 3), i)
+                        for i, value in enumerate(result["forecast"], start=1)]
+                cur.executemany(get_upsert_sql("predict"), rows)
+                count += len(rows)
+                lines.append(f"{category}: {result['winner']} MAPE={result['mape']:.3f}% 通过{threshold:g}%门槛，写入{len(rows)}条")
         conn.commit()
-        lines.append(f"{cat}({name}): {model}, 测试集MAPE={mape:.2f}%, "
-                     f"预测 {last_date + timedelta(days=1):%Y-%m-%d} ~ "
-                     f"{last_date + timedelta(days=horizon):%Y-%m-%d} 共{horizon}条")
-        print(f"[{cat}] {model} MAPE={mape:.2f}% -> 未来{horizon}天已写入")
+    except Exception:
+        conn.rollback()
+        raise
+    return {"rows_written": count, "detail": "; ".join(lines), "lines": lines}
 
-    conn.close()
-    detail = "; ".join(lines)
-    print(f"\n预计算完成(后端={DB_BACKEND}): {detail}")
-    return {"rows_written": rows_written, "detail": detail, "lines": lines}
+
+def precompute_all(horizon=HORIZON, threshold=MAPE_THRESHOLD, snapshot=None, record_log=True):
+    admitted(0, threshold)
+    if horizon != HORIZON:
+        raise ValueError("当前展示协议固定为未来7天")
+    started = datetime.now(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
+    status, detail, count = "FAILED", "预计算未完成", 0
+    conn = get_connection()
+    try:
+        results = compare_snapshot(load_snapshot(snapshot), horizon)
+        summary = publish_results(conn, results, threshold)
+        status, detail, count = "SUCCESS", summary["detail"], summary["rows_written"]
+        print(detail, flush=True)
+        return summary
+    except Exception as exc:
+        detail = f"预计算失败（{type(exc).__name__}），未发布新批次"
+        raise
+    finally:
+        try:
+            if record_log:
+                with cursor(conn) as cur:
+                    cur.execute(get_insert_log_sql(), ("precompute", status, detail[:1000], count,
+                                started.isoformat(sep=" "), datetime.now(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None).isoformat(sep=" ")))
+                conn.commit()
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":
-    precompute_all()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--snapshot", type=Path)
+    parser.add_argument("--threshold", type=float, default=MAPE_THRESHOLD)
+    args = parser.parse_args()
+    precompute_all(threshold=args.threshold, snapshot=args.snapshot)

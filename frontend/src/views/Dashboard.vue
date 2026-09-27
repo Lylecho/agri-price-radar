@@ -15,6 +15,9 @@ const selected = ref('')
 const rangeDays = ref(90)
 const trendPoints = ref([])
 const predictData = ref(null)
+const predictError = ref(false)
+const detailLoading = ref(false)
+let detailSequence = 0
 
 const rangeOptions = [
   { label: '近90天', value: 90 },
@@ -77,15 +80,19 @@ async function loadCards() {
 
 async function loadDetail() {
   if (!selected.value) return
+  const sequence = ++detailSequence
+  detailLoading.value = true
+  predictData.value = null
+  predictError.value = false
   const [trend, pred] = await Promise.allSettled([
     fetchTrend(selected.value, rangeDays.value),
     fetchPredict(selected.value),
   ])
+  if (sequence !== detailSequence) return
   trendPoints.value = trend.status === 'fulfilled' ? trend.value : []
   predictData.value = pred.status === 'fulfilled' ? pred.value : null
-  if (pred.status === 'rejected') {
-    ElMessage.warning(`${selected.value} 暂无预测数据`)
-  }
+  predictError.value = pred.status === 'rejected'
+  detailLoading.value = false
 }
 
 async function refresh() {
@@ -158,19 +165,19 @@ onMounted(refresh)
     </AppCard>
 
     <!-- 预测 -->
-    <AppCard variant="light" class="block">
+    <AppCard variant="light" class="block" v-loading="detailLoading">
+      <el-empty v-if="predictError" description="预测数据加载失败，请稍后重试（仅供参考）" />
       <PredictChart
-        v-if="predictData"
+        v-else-if="!detailLoading"
         :history="predictHistory"
         :predict="predictPoints"
-        :model="predictData.model"
-        :mape="predictData.mapeTest"
-        :disclaimer="predictData.disclaimer"
+        :model="predictData?.model || ''"
+        :mape="predictData?.mapeTest ?? null"
+        :disclaimer="predictData?.disclaimer || '预测结果仅供参考，不构成任何买卖建议'"
         height="380px"
       />
-      <el-empty v-else description="该品类暂无预测数据（请先运行预计算任务）" />
-      <p v-if="predictData" class="t-micro disclaimer">
-        ★ {{ predictData.disclaimer }}（本系统为行政性监测与预警工具）
+      <p class="t-micro disclaimer">
+        ★ 预测结果仅供参考，不构成任何买卖建议（本系统为行政性监测与预警工具）
       </p>
     </AppCard>
   </div>
