@@ -132,3 +132,14 @@ mvn -s maven-settings.xml test
 - 审计查询默认 page=1、size=10（最大 100）；action 为 LOGIN / CHANGE_PASSWORD / UPDATE_ALERT_RULE / TRIGGER_COLLECT。采集的 SUCCESS 仅表示受理，异步真实结果看 collect_log。IP 为直接连接地址，时间为上海时区。
 - 自测：ADMIN 登录 → 改阈值 → 触发采集 → 改密 → 查询四动作；DATA_ADMIN 查询 code=403，匿名 code=401（沿用 HTTP 200 + 业务码）。品类页复用 collect/stats，零新增配置表。
 - 验收记录见 [R1 DEVLOG](../docs/DEVLOG.md)。Redis 属后续环境接入，不阻断 W3 验收。
+
+
+## 八、W4 / R3 实时预测与降级
+
+- `GET /api/predict/realtime?category=黄瓜&days=7`：ADMIN、DATA_ADMIN登录可访问；days为1–7，省略默认7。非法参数code400，匿名code401，沿用HTTP200加统一业务码。
+- 成功data含category、prodName、model、mapeTest、points（date/yhat）、disclaimer、degraded、source、admitted、message。正常source=REALTIME；算法超时/连接拒绝/5xx/协议无效则source=PRECOMPUTED且degraded=true，提示“实时通道不可用，已回退预计算结果”。回退也没有数据时code200、points=[]，页面显示空状态。
+- 正常算法MAPE超过30%返回admitted=false、degraded=false、空点集，不能用旧曲线绕过门禁。模型选择在Python共用R2实现，Java负责代理与协议/质量校验。原 `/api/predict/latest` 契约不变。
+- `APR_ML_BASE_URL` 默认 `http://127.0.0.1:8001`；`APR_ML_TIMEOUT_MS` 默认2800，限制在1–3000ms，连接超时最多500ms。JDK17客户端对完整响应体设截止时间，超时取消请求，无重试/重定向。此期限仅约束算法HTTP调用，回退数据库查询仍使用已有数据库配置。
+- 无DDL变更；回退SQL使用现有参数化Mapper。日志仅记录异常类型，不输出完整请求或凭据。FastAPI启动见 [Python说明](../python/README.md)，仅绑定本机。
+- 回归测试共50例（原40+RealtimePredictIntegrationTest 10例）：正常、响应头超时、响应体超时、连接拒绝、503、非法协议、空回退、质量拒绝、参数校验、匿名鉴权。测试以真实本机HTTP桩验证客户端，只替换预计算Mapper以隔离业务数据。
+- 手工自测：登录看板点击“实时预测” → 停止uvicorn → 再次点击，看到降级标识与原预计算曲线 → 重启uvicorn并等待预热 → 再次点击恢复“实时”。实测证据归档于 [DEVLOG R3](../docs/DEVLOG.md)。

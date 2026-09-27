@@ -54,6 +54,11 @@ public class GlobalExceptionHandler {
         return Result.fail(ResultCode.PARAM_ERROR, "缺少必要参数: " + e.getParameterName());
     }
 
+    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+    public Result<Void> handleTypeMismatch(Exception e) {
+        return Result.fail(ResultCode.PARAM_ERROR, "请求参数类型错误");
+    }
+
     /** 方法参数校验失败(@Validated + @Min/@Max) —— 必须映射为 400 而非 500 */
     @ExceptionHandler(ConstraintViolationException.class)
     public Result<Void> handleConstraint(ConstraintViolationException e) {

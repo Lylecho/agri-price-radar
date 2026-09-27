@@ -3,6 +3,7 @@ package com.agri.priceradar.controller;
 import com.agri.priceradar.common.Result;
 import com.agri.priceradar.service.PredictService;
 import com.agri.priceradar.vo.PredictVO;
+import com.agri.priceradar.vo.RealtimePredictVO;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -26,5 +27,12 @@ public class PredictController {
     @GetMapping("/latest")
     public Result<PredictVO> latest(@RequestParam String category) {
         return Result.ok(predictService.latest(category));
+    }
+
+    /** 登录用户可用的实时通道；算法服务异常时带degraded标记回退。 */
+    @GetMapping("/realtime")
+    public Result<RealtimePredictVO> realtime(@RequestParam String category,
+            @RequestParam(defaultValue = "7") int days) {
+        return Result.ok(predictService.realtime(category, days));
     }
 }

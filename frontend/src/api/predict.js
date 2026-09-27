@@ -7,3 +7,7 @@ import request from './request'
 export function fetchPredict(category) {
   return request.get('/api/predict/latest', { params: { category }, emptyPredictionOn404: true })
 }
+
+export function fetchRealtimePredict(category, days = 7) {
+  return request.get('/api/predict/realtime', { params: { category, days } })
+}

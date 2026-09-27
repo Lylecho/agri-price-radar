@@ -3,6 +3,9 @@ requests>=2.31
 pandas>=2.0
 statsmodels>=0.14
 prophet==1.4.0            # W4 Windows 官方 wheel，固定实验版本
+fastapi==0.141.1          # W4 本机算法HTTP通道
+uvicorn==0.54.0
+httpx==0.28.1             # FastAPI TestClient 测试传输
 pyecharts>=2.0
 apscheduler>=3.10,<4      # W1 定时调度
 pymysql>=1.1              # W1 MySQL 迁移

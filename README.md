@@ -193,6 +193,7 @@ CREATE TABLE alert_record (            -- 预警触发记录(同品类+指标+�
 | ✅ | GET | /api/price/trend?category=&days= | 日度均价序列（days 1–1095） | 登录 |
 | ✅ | GET | /api/price/change?category= | 最新日环比（红涨绿跌） | 登录 |
 | ✅ | GET | /api/predict/latest?category= | 未来7天预测+模型+MAPE+免责声明 | 登录 |
+| ✅ | GET | /api/predict/realtime?category=&days= | 实时预测（1–7天，默认7）；异常回退预计算，含 degraded/source/admitted | 登录 |
 | ✅ | GET | /api/alert/rules | 预警规则列表 | 登录 |
 | ✅ | PUT | /api/alert/rules/{id} | 修改阈值/启用状态 | **ADMIN** |
 | ✅ | POST | /api/alert/evaluate | 立即执行一次预警评估 | **ADMIN** |
@@ -202,7 +203,7 @@ CREATE TABLE alert_record (            -- 预警触发记录(同品类+指标+�
 | ✅ | GET | /api/admin/collect/stats?category= | 各品类数据量/时间跨度/主导单位/单位检查条数 | DATA_ADMIN / ADMIN |
 | ✅ | GET | /api/admin/oplog?page=&size=&username=&action= | 操作审计分页，用户名与动作精确筛选 | **ADMIN** |
 | ✅ | POST | /api/admin/collect/trigger | 手动触发一次增量采集（异步子进程） | DATA_ADMIN / ADMIN |
-| ⏳ | POST | /ml/forecast | FastAPI 实时预测 `{category, days}`（内网，可降级） | 内网 |
+| ✅ | POST | /ml/forecast | FastAPI 快照预测 `{category, days}`；model/yhat/mape_test/admitted/disclaimer | 仅本机 127.0.0.1:8001 |
 
 ## 7. 算法方案
 
@@ -212,6 +213,9 @@ CREATE TABLE alert_record (            -- 预警触发记录(同品类+指标+�
 - W4/R2 离线部分已完成：ARIMA 在训练集按 AIC 选阶，与 Prophet 在同一后20%测试段按 MAPE 择优；默认 **MAPE ≤ 30%** 才发布预测。映射与斤价过滤保持一致，近730天窗口锚定入库数据截止日，缺测线性插值不跨切分边界污染训练段。
 - 2026-09-27 固定快照择优：大白菜 ARIMA(2,1,1) 22.149%、黄瓜 Prophet 24.869%、西红柿 ARIMA(2,1,2) 39.356%（暂停展示）、猪肉 ARIMA(1,1,1) 5.299%、鸡蛋 Prophet 8.211%。完整对照、耗时与局限见 [W4-MODEL-REPORT](docs/W4-MODEL-REPORT.md)。
 - 准入失败不写 `predict_result`，同时撤下该品类旧派生预测并写 `collect_log` 摘要；准入成功使用既有 uk_pred + 参数化批量 upsert，原子更新当前模型未来7天窗口。本次四品类共28条。前端空预测显示“波动过大，暂不提供预测（仅供参考）”，网络错误单独提示；后端接口保持原有契约。
+- W4/R3 实时部分已完成：FastAPI 只读已入库快照，共用 R2 对比择优与 30% 门禁；启动预热，同快照复用计算结果，内容变化即失效，不读取预计算表冒充实时模型结果。新快照计算繁忙返回503；冷计算可能超过代理截止时间，当前请求回退，计算完成后后续请求可恢复。
+- SpringBoot 代理默认完整响应截止时间2800ms，上限3000ms，连接最多500ms，无重试；超时、连接拒绝、5xx、无效响应均回退参数化预计算查询。`degraded=true/source=PRECOMPUTED`；预计算也不可用则返回成功空结果，不抛500。正常超门禁属于质量拒绝（`degraded=false/admitted=false`），不恢复旧曲线。
+- 页面区分“实时”与“预计算 · 已降级”，显示回退提示并常驻免责声明。启动与协议见 [python/README.md](python/README.md)、[backend/README.md](backend/README.md)。
 - 所有预测输出必须携带：模型标识、测试集 MAPE、「预测结果仅供参考，不构成任何买卖建议」。
 
 ## 8. Dify 方案（W5）
@@ -269,7 +273,7 @@ agri-price-radar/
 | **W1** | **采集服务化：DDL v2 迁移 + 增量采集 + APScheduler 定时 + MySQL 切换 + predict_result 预计算 + collect_log** | ✅ 2026-09-24（本地完成，待推送） |
 | W2 | SpringBoot 后端：§6 接口 + JWT/RBAC + Redis | ✅ W2.1+W2.2 完成（鉴权/预警/触发/告警测试） |
 | W3 | Vue3 管理端（品类管理/趋势/预测/任务日志页） | ✅ R1 / v0.7.0：登录、看板、采集监控、预警配置、首次改密、只读品类管理与操作审计全部完成 |
-| W4 | 算法升级：Prophet 对比、MAPE 准入、FastAPI /ml 通道 | ▶ R2 / v0.8.0 离线对比与30%准入完成；FastAPI /ml 待办 |
+| W4 | 算法升级：Prophet 对比、MAPE 准入、FastAPI /ml 通道 | ✅ R2 + R3 / v0.9.0：离线择优、30%准入、实时代理与停服降级验收完成 |
 | W5 | Dify 智能问答 + 1920×1080 可视化大屏（canvas-night） | 待启动 |
 
 ## 13. 风险与对策（踩坑台账）
@@ -318,7 +322,7 @@ agri-price-radar/
 - [x] W3：首次登录强制改密（sys_user 标记 + 服务端拦截 + 改密接口与页面；后端 32 例全绿）
 - [x] W3：只读品类管理（方案 B）、操作审计（op_log，四动作 + ADMIN 查询；40 例测试通过）
 - [x] W4/R2：Prophet/ARIMA 五品类对比、MAPE 30%准入、幂等预计算与前端空预测兜底（Python21例通过）
-- [ ] W4：FastAPI /ml 实时通道
+- [x] W4/R3：FastAPI /ml 实时通道、SpringBoot限时代理与优雅降级（后端50例/Python29例通过，浏览器停服回退验收）
 - [ ] W5：Dify 智能问答 + 1920×1080 可视化大屏
 
-R1/R2 验收与决策归档见 [docs/DEVLOG.md](docs/DEVLOG.md)。W4 后续为 FastAPI 实时通道，日常展示继续读取预计算表。
+R1/R2/R3 验收与决策归档见 [docs/DEVLOG.md](docs/DEVLOG.md)。W4 已关闭，下一阶段 W5 为 Dify 与可视化大屏；日常展示继续读取预计算表。

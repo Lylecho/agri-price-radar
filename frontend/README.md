@@ -60,3 +60,10 @@ src/
 - 首次改密已完成：运行一次 W3 数据库迁移，使用仍为预置密码的账号登录，应被引导到 `/change-password`；改密前访问 `/dashboard` 会被拦截。
 - R1 两新页浏览器验收通过，`npm run build` 无错误（保留已有 chunk 体积提示）。截图和完整记录见 [DEVLOG](../docs/DEVLOG.md)。
 - 后续大屏归属 W5；下一轮先推进 W4 的 Prophet 对比与 MAPE 准入。
+
+
+## R3 实时预测
+
+看板“实时预测”调用已登录的 `/api/predict/realtime`，默认未来7天。绿色“实时”徽标区别于日常预计算；降级时显示“预计算 · 已降级”与回退提示，曲线继续展示预计算数据。无可用回退时为空状态，免责声明始终显示。MAPE仅在页面格式化为三位小数，不改变服务端30%准入判定。快速切换品类时忽略旧请求结果。
+
+完整服务启动、关停算法服务的验收步骤见 [Python说明](../python/README.md) 与 [DEVLOG](../docs/DEVLOG.md)。构建：`npm run build`（Windows可用 `npm.cmd run build`）。

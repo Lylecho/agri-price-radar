@@ -12,6 +12,7 @@ const props = defineProps({
   mape: { type: [Number, String], default: null },
   disclaimer: { type: String, default: '预测结果仅供参考, 不构成任何买卖建议' },
   height: { type: String, default: '380px' },
+  emptyMessage: { type: String, default: '波动过大，暂不提供预测（仅供参考）' },
 })
 
 const el = ref(null)
@@ -30,7 +31,7 @@ function buildOption() {
 
   const sub = [
     props.model ? `模型 ${props.model}` : '',
-    props.mape != null ? `测试集 MAPE ${props.mape}%` : '',
+    props.mape != null ? `测试集 MAPE ${Number(props.mape).toFixed(3)}%` : '',
     props.disclaimer,
   ]
     .filter(Boolean)
@@ -110,7 +111,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="predict.length" ref="el" class="chart" :style="{ height }"></div>
-  <el-empty v-else description="波动过大，暂不提供预测（仅供参考）" />
+  <el-empty v-else :description="emptyMessage" />
 </template>
 
 <style scoped>

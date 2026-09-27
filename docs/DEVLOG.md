@@ -94,3 +94,53 @@
 - R2离线目标完成，W4整体仍有FastAPI `/ml`实时通道待办。
 - Prophet年周期训练不足两个完整周期存在识别限制；测试段用于选模、含少量插值日，146天一次性外推MAPE不等同7天滚动误差。保留失败对照，不夸大泛化结论；后续独立评估可采用滚动起点和额外保留段。
 - 日常调度应在升级后重新启动加载新实现；本轮验收时未发现常驻调度进程，未擅自创建新的自启动配置。
+
+
+## R3 · W4 算法服务：FastAPI实时通道与优雅降级
+
+### 轮次编号
+
+- R3，2026-09-28；分支 `main`，里程碑标签 `v0.9.0`；承接 R2/v0.8.0，关闭 W4。
+
+### 开发目标
+
+打通 FastAPI `/ml/forecast` → SpringBoot 登录代理 → 看板实时入口；算法故障时自动回退预计算，保持主流程与免责声明。
+
+### 改动文件
+
+- 新增 `python/ml/api.py`、`python/tests/test_ml_api.py`、`python/README.md`；修改 `ml/compare_models.py`、`requirements.txt`。
+- 新增后端 `service/MlForecastClient.java`、`vo/RealtimePredictVO.java`、`RealtimePredictIntegrationTest.java`；修改 `PredictService`、`PredictController`、`GlobalExceptionHandler`、`application.yml`。
+- 修改前端 `api/predict.js`、`views/Dashboard.vue`、`components/charts/PredictChart.vue`。
+- 同步根 README §6/§7/§12/§14、backend/README、frontend/README、本日志；新增两张验收截图 `docs/screenshots/r3-{realtime,degraded}.png`。
+
+### 改动说明
+
+1. **无DDL变更**。FastAPI只读已入库快照，不调用采集器、不自动建表、不写predict_result/collect_log。MySQL会话只读、SQLite mode=ro，SQL参数化。凭据由环境/本地忽略配置注入；测试凭据运行时生成，临时验收账号已退出并清理，源码与示例无可用凭据字面量。
+2. 抽出R2单品类比较函数，共用既有ARIMA/Prophet择优与 **MAPE ≤ 30%** 门禁。Java不重复实现训练算法。正常未准入返回admitted=false、空序列、degraded=false，不能回退旧曲线绕过门禁。
+3. 实时服务启动预热五品类；每次请求重读快照并按内容摘要失效缓存，同快照复用计算结果。新快照只允许单个训练任务，繁忙503；冷训练可能超出Java截止时间，此次回退，计算完成后可恢复。缓存仅每品类一份，不读取预计算表冒充实时计算。
+4. Java `GET /api/predict/realtime` 登录可访问，默认7天、范围1–7。HTTP完整响应默认2800ms截止，上限3000ms，连接最多500ms；无重试。超时、拒绝、5xx、无效响应统一返回预计算，degraded=true。无预计算或回退读库失败则成功空状态，不抛500。截止时间约束算法HTTP调用，不包含回退数据库耗时。
+5. 前端增加“实时”徽标、实时按钮、降级提示、空回退状态；免责声明常驻。显示MAPE三位小数，准入仍使用原始数值；快速切换品类时忽略迟到结果。
+
+### 验证结果
+
+| 检查 | 结果与证据 |
+|---|---|
+| 后端 JDK17 `mvn -s maven-settings.xml test` | **50/50**，0失败/错误/跳过；原40+新增10 |
+| 新增集成用例 | 真实HTTP桩：正常、慢响应头、慢响应体、关停桩后的连接拒绝、503、无效协议；另覆盖空回退、质量拒绝、参数校验与匿名鉴权；DATA_ADMIN正常访问 |
+| 超时测试 | 设置400ms客户端期限，慢响应头/响应体各1200ms；均回退，断言总耗时低于1100ms通过 |
+| Python `python -m unittest discover -s python/tests -v` | **29/29**，原21+API/缓存失效/繁忙/门禁/SQLite只读等8例 |
+| R2固定快照复跑 | 五品类胜出模型不变，两模型MAPE差异均<1e-8；大白菜22.149%、黄瓜24.869%、西红柿39.356%拒绝、猪肉5.299%、鸡蛋8.211% |
+| 真库FastAPI | 预热后黄瓜3日HTTP200/Prophet/24.869%/3点，约0.245s；西红柿HTTP200/39.356%/空序列，约0.136s |
+| 浏览器完整正常链路 | 临时ADMIN登录 → 点击实时预测 → 显示绿色“实时”、大白菜ARIMA(2,1,1)、MAPE22.149%、未来7日曲线与免责声明 |
+| **真实停服降级** | 确认并停止本轮uvicorn进程15600 → 同一页面再次点击实时预测 → “预计算 · 已降级”及“实时通道不可用，已回退预计算结果”，预计算曲线与趋势仍显示；控制台错误/警告0条 |
+| **恢复验证** | 重启uvicorn（本轮进程24188），等待预热 → 同页点击实时预测恢复绿色“实时”，降级提示消失，无需重启主后端 |
+| 前端生产构建 | 最终 `npm.cmd run build` 0 error；保留原有大于500kB的chunk提示 |
+| 打包与临时数据 | 后端package成功，8081/5173可运行；临时账号r3_qa_admin已退出、角色关联与用户行已删除，忽略目录凭据文件已删除，审计记录保留 |
+
+截图：[实时/恢复页面](screenshots/r3-realtime.png)、[实际停服回退页面](screenshots/r3-degraded.png)。本地测试原始日志在已忽略的 `backend/target/r3-*.log`，不提交运行日志和凭据。
+
+### 遗留问题与下一步
+
+- R3验收完成，W4整体可关闭。下一里程碑W5：按蓝图推进Dify智能问答与1920×1080可视化大屏。
+- 新快照冷训练耗时可能超过代理期限，依设计降级；同快照预热/缓存后恢复。MAPE仍是R2留出测试误差，不代表未来7天保证误差。
+- 前端现有chunk体积提示未扩大处理范围；本轮未创建任何自启动任务。

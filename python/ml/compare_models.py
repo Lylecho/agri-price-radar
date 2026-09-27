@@ -18,12 +18,12 @@ from ml.prophet_model import prophet_forecast
 from ml.model_common import LOOKBACK_DAYS, HORIZON, prepare_series, choose_best, admitted
 
 
-def load_snapshot(path=None):
+def load_snapshot(path=None, connection_factory=get_connection):
     """同一事务读取斤价日均快照；窗口锚定数据截止日，支持离线复现。"""
     if path:
         data = pd.read_csv(path, parse_dates=["date"], float_precision="round_trip")
     else:
-        conn = get_connection()
+        conn = connection_factory()
         rows = []
         sql = ("SELECT pub_date, AVG(avg_price) FROM price_daily WHERE prod_name = %s "
                "AND unit_info = %s AND avg_price IS NOT NULL GROUP BY pub_date ORDER BY pub_date"
@@ -47,27 +47,33 @@ def load_snapshot(path=None):
     return data.sort_values(["category", "date"]).reset_index(drop=True)
 
 
+def compare_category(data, category, name, horizon=HORIZON):
+    subset = data[(data.category == category) & (data.prod_name == name)]
+    series = pd.Series(subset.price.to_numpy(), index=pd.DatetimeIndex(subset.date))
+    full, train, test = prepare_series(series)
+    candidates = [arima_forecast(series, horizon), prophet_forecast(series, horizon)]
+    winner = choose_best(candidates)
+    models = []
+    for candidate in candidates:
+        row = asdict(candidate)
+        row["forecast"] = candidate.forecast.tolist()
+        models.append(row)
+    return {"category": category, "prod_name": name, "start": str(full.index[0].date()),
+                    "end": str(full.index[-1].date()), "observed": len(series),
+                    "missing": len(full) - len(series), "train_n": len(train), "test_n": len(test),
+                    "test_start": str(test.index[0].date()), "models": models,
+                    "winner": winner.model, "mape": winner.mape,
+                    "forecast": winner.forecast.tolist()}
+
+
 def compare_snapshot(data, horizon=HORIZON):
     results = []
     for category, name in REPRESENTATIVES:
-        subset = data[(data.category == category) & (data.prod_name == name)]
-        series = pd.Series(subset.price.to_numpy(), index=pd.DatetimeIndex(subset.date))
-        full, train, test = prepare_series(series)
-        candidates = [arima_forecast(series, horizon), prophet_forecast(series, horizon)]
-        winner = choose_best(candidates)
-        models = []
-        for candidate in candidates:
-            row = asdict(candidate)
-            row["forecast"] = candidate.forecast.tolist()
-            models.append(row)
-        results.append({"category": category, "prod_name": name, "start": str(full.index[0].date()),
-                        "end": str(full.index[-1].date()), "observed": len(series),
-                        "missing": len(full) - len(series), "train_n": len(train), "test_n": len(test),
-                        "test_start": str(test.index[0].date()), "models": models,
-                        "winner": winner.model, "mape": winner.mape,
-                        "forecast": winner.forecast.tolist()})
-        print(f"{category}: " + " / ".join(f"{r.model} MAPE={r.mape:.3f}% 耗时={r.seconds:.2f}s" for r in candidates)
-              + f" -> {winner.model}", flush=True)
+        row = compare_category(data, category, name, horizon)
+        results.append(row)
+        print(f"{category}: " + " / ".join(
+            f"{m['model']} MAPE={m['mape']:.3f}% 耗时={m['seconds']:.2f}s" for m in row["models"])
+            + f" -> {row['winner']}", flush=True)
     return results
 
 

@@ -3,7 +3,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { fetchCategories, fetchChange, fetchTrend } from '@/api/price'
-import { fetchPredict } from '@/api/predict'
+import { fetchPredict, fetchRealtimePredict } from '@/api/predict'
+import AppButton from '@/components/ui/AppButton.vue'
 import AppCard from '@/components/ui/AppCard.vue'
 import AppPill from '@/components/ui/AppPill.vue'
 import TrendChart from '@/components/charts/TrendChart.vue'
@@ -17,6 +18,7 @@ const trendPoints = ref([])
 const predictData = ref(null)
 const predictError = ref(false)
 const detailLoading = ref(false)
+const realtimeLoading = ref(false)
 let detailSequence = 0
 
 const rangeOptions = [
@@ -81,6 +83,7 @@ async function loadCards() {
 async function loadDetail() {
   if (!selected.value) return
   const sequence = ++detailSequence
+  realtimeLoading.value = false
   detailLoading.value = true
   predictData.value = null
   predictError.value = false
@@ -114,6 +117,22 @@ async function selectCategory(category) {
 
 async function onRangeChange() {
   await loadDetail()
+}
+
+async function requestRealtime() {
+  if (!selected.value || detailLoading.value || realtimeLoading.value) return
+  const sequence = ++detailSequence
+  realtimeLoading.value = true
+  try {
+    const result = await fetchRealtimePredict(selected.value)
+    if (sequence !== detailSequence) return
+    predictData.value = result
+    predictError.value = false
+  } catch {
+    // 主后端/网络异常时保留当前已加载图表；算法故障由后端正常200降级。
+  } finally {
+    if (sequence === detailSequence) realtimeLoading.value = false
+  }
 }
 
 onMounted(refresh)
@@ -166,6 +185,15 @@ onMounted(refresh)
 
     <!-- 预测 -->
     <AppCard variant="light" class="block" v-loading="detailLoading">
+      <div class="block-head">
+        <AppPill :variant="predictData?.source === 'REALTIME' ? 'green' : 'soft'">
+          {{ predictData?.source === 'REALTIME' ? '实时' : predictData?.degraded ? '预计算 · 已降级' : '预计算' }}
+        </AppPill>
+        <AppButton type="button" :disabled="detailLoading || realtimeLoading || !selected" @click="requestRealtime">
+          {{ realtimeLoading ? '正在请求实时预测…' : '实时预测' }}
+        </AppButton>
+      </div>
+      <el-alert v-if="predictData?.degraded" :title="predictData.message" type="warning" :closable="false" show-icon />
       <el-empty v-if="predictError" description="预测数据加载失败，请稍后重试（仅供参考）" />
       <PredictChart
         v-else-if="!detailLoading"
@@ -174,6 +202,7 @@ onMounted(refresh)
         :model="predictData?.model || ''"
         :mape="predictData?.mapeTest ?? null"
         :disclaimer="predictData?.disclaimer || '预测结果仅供参考，不构成任何买卖建议'"
+        :empty-message="predictData?.degraded ? '暂无可用预计算结果（仅供参考）' : '波动过大，暂不提供预测（仅供参考）'"
         height="380px"
       />
       <p class="t-micro disclaimer">
